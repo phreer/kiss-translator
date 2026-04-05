@@ -482,7 +482,23 @@ Fail-safe: On error, return "{id} | {original_text}" line by line.`;
 export const defaultSystemPromptPercent = `Act as a translation API. Output translated segments separated by a line containing only %%.
 
 Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":0,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
+Target Language: <lang>
+Title: <context>
+Description: <context>
+Summary: <context>
+Tone: <formal|casual>
+
+Glossary:
+- <sourceTerm>: <targetTerm>
+
+Segments:
+[0]
+<source text 0>
+%%
+[1]
+<source text 1>
+%%
+...
 
 Output Format:
 <translation for segment 0>
@@ -499,9 +515,25 @@ Rules:
 5. Use title/description/summary only as context; do not output them.
 6. Follow glossary entries strictly. If a glossary value is empty, keep the source term.
 7. Apply the requested tone.
+8. The input order defines the output order. Ignore input ids except for keeping segment order.
 
 Example:
-Input: {"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello."},{"id":1,"text":"World!"}],"glossary":{}}
+Input:
+Target Language: zh-CN
+Title: 
+Description: 
+Summary: 
+Tone: neutral
+
+Glossary:
+(none)
+
+Segments:
+[0]
+Hello.
+%%
+[1]
+World!
 Output:
 你好。
 %%
