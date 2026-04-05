@@ -32,14 +32,17 @@ jest.mock("./history", () => ({ getMsgHistory: jest.fn() }));
 jest.mock("../subtitle/vtt", () => ({ parseBilingualVtt: jest.fn() }));
 jest.mock("../libs/docInfo", () => ({ getDocInfo: jest.fn(() => ({})) }));
 
-import { parseAIRes } from "./trans";
+import { genUserPrompt, parseAIRes } from "./trans";
 import {
   defaultSystemPrompt,
+  defaultLlmInputTemplatePercent,
+  defaultLlmInputSegmentTemplatePercent,
   defaultSystemPromptLines,
   defaultSystemPromptPercent,
   defaultSystemPromptXml,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_MAPPING_BY_ORDER,
   LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   LLM_OUTPUT_FORMAT_XML,
@@ -79,6 +82,26 @@ describe("resolveLlmOutputFormat", () => {
 });
 
 describe("parseAIRes", () => {
+  it("renders percent input template for batch prompts", () => {
+    const prompt = genUserPrompt({
+      useBatchFetch: true,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+      llmInputTemplate: defaultLlmInputTemplatePercent,
+      llmInputSegmentTemplate: defaultLlmInputSegmentTemplatePercent,
+      llmInputSegmentsSeparator: "\n%%\n",
+      systemPrompt: defaultSystemPromptPercent,
+      toLang: "zh-CN",
+      texts: ["Hello.", "World!"],
+      glossary: { World: "世界" },
+      docInfo: {},
+      tone: "neutral",
+    });
+
+    expect(prompt).toContain("Target Language: zh-CN");
+    expect(prompt).toContain("[0]\nHello.");
+    expect(prompt).toContain("\n%%\n[1]\nWorld!");
+  });
+
   it("parses json explicitly", () => {
     const raw =
       'prefix {"translations":[{"id":0,"text":"你好","sourceLanguage":"en"}]} suffix';
@@ -105,6 +128,22 @@ describe("parseAIRes", () => {
   it("parses percent output explicitly", () => {
     const raw = "你好\n%%\n世界";
     expect(parseAIRes(raw, true, LLM_OUTPUT_FORMAT_PERCENT)).toEqual([
+      ["你好", ""],
+      ["世界", ""],
+    ]);
+  });
+
+  it("parses custom by-order template output", () => {
+    const raw = "<seg>你好</seg>\n---\n<seg>世界</seg>";
+    expect(
+      parseAIRes(raw, true, LLM_OUTPUT_FORMAT_AUTO, {
+        llmOutputFormat: LLM_OUTPUT_FORMAT_AUTO,
+        llmOutputTemplate: "{{segments}}",
+        llmOutputSegmentTemplate: "<seg>{{translation}}</seg>",
+        llmOutputSegmentsSeparator: "\n---\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ORDER,
+      })
+    ).toEqual([
       ["你好", ""],
       ["世界", ""],
     ]);

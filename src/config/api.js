@@ -25,6 +25,8 @@ export const LLM_OUTPUT_FORMAT_JSON = "json";
 export const LLM_OUTPUT_FORMAT_XML = "xml";
 export const LLM_OUTPUT_FORMAT_TEXTLINES = "textlines";
 export const LLM_OUTPUT_FORMAT_PERCENT = "percent";
+export const LLM_OUTPUT_MAPPING_BY_ID = "by_id";
+export const LLM_OUTPUT_MAPPING_BY_ORDER = "by_order";
 export const LLM_OUTPUT_FORMAT_ALL = [
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
@@ -507,6 +509,86 @@ Output:
 
 Fail-safe: If translation fails, still output one segment per input in the same order, separated by %%.`;
 
+export const defaultLlmInputTemplateJson = `{"targetLanguage":{{to_lang|json}},"title":{{title|json}},"description":{{description|json}},"summary":{{summary|json}},"segments":[{{segments}}],"glossary":{{glossary|json}},"tone":{{tone|json}}}`;
+
+export const defaultLlmInputSegmentTemplateJson = `{"id":{{id}},"text":{{source_text|json}}}`;
+
+export const defaultLlmInputTemplatePercent = `Target Language: {{to_lang}}
+Title: {{title}}
+Description: {{description}}
+Summary: {{summary}}
+Tone: {{tone}}
+
+Glossary:
+{{glossary_lines}}
+
+Segments:
+{{segments}}`;
+
+export const defaultLlmInputSegmentTemplatePercent = `[{{id}}]
+{{source_text}}`;
+
+export const defaultLlmOutputTemplateJson = `{"translations":[{{segments}}]}`;
+export const defaultLlmOutputSegmentTemplateJson = `{"id":{{id}},"text":{{translation|json}},"sourceLanguage":{{source_language|json}}}`;
+
+export const defaultLlmOutputTemplateXml = `<root>
+{{segments}}
+</root>`;
+export const defaultLlmOutputSegmentTemplateXml = `<t id="{{id}}" sourceLanguage="{{source_language}}">{{translation}}</t>`;
+
+export const defaultLlmOutputTemplateTextLines = `{{segments}}`;
+export const defaultLlmOutputSegmentTemplateTextLines = `{{id}} | {{translation}}`;
+
+export const defaultLlmOutputTemplatePercent = `{{segments}}`;
+export const defaultLlmOutputSegmentTemplatePercent = `{{translation}}`;
+
+export const getLlmTemplatePreset = (llmOutputFormat) => {
+  switch (llmOutputFormat) {
+    case LLM_OUTPUT_FORMAT_JSON:
+      return {
+        llmInputTemplate: defaultLlmInputTemplateJson,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
+        llmInputSegmentsSeparator: ",",
+        llmOutputTemplate: defaultLlmOutputTemplateJson,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplateJson,
+        llmOutputSegmentsSeparator: ",",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+      };
+    case LLM_OUTPUT_FORMAT_XML:
+      return {
+        llmInputTemplate: defaultLlmInputTemplateJson,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
+        llmInputSegmentsSeparator: ",",
+        llmOutputTemplate: defaultLlmOutputTemplateXml,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplateXml,
+        llmOutputSegmentsSeparator: "\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+      };
+    case LLM_OUTPUT_FORMAT_TEXTLINES:
+      return {
+        llmInputTemplate: defaultLlmInputTemplateJson,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
+        llmInputSegmentsSeparator: ",",
+        llmOutputTemplate: defaultLlmOutputTemplateTextLines,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplateTextLines,
+        llmOutputSegmentsSeparator: "\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+      };
+    case LLM_OUTPUT_FORMAT_PERCENT:
+      return {
+        llmInputTemplate: defaultLlmInputTemplatePercent,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplatePercent,
+        llmInputSegmentsSeparator: "\n%%\n",
+        llmOutputTemplate: defaultLlmOutputTemplatePercent,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplatePercent,
+        llmOutputSegmentsSeparator: "\n%%\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ORDER,
+      };
+    default:
+      return null;
+  }
+};
+
 export const resolveLlmOutputFormat = ({
   llmOutputFormat,
   systemPrompt = "",
@@ -604,6 +686,13 @@ const defaultApi = {
   model: "", // 模型名称
   systemPrompt: defaultSystemPromptXml,
   llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
+  llmInputTemplate: defaultLlmInputTemplateJson,
+  llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
+  llmInputSegmentsSeparator: ",",
+  llmOutputTemplate: defaultLlmOutputTemplateXml,
+  llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplateXml,
+  llmOutputSegmentsSeparator: "\n",
+  llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ID,
   subtitlePrompt: defaultSubtitlePrompt,
   nobatchPrompt: defaultNobatchPrompt,
   nobatchUserPrompt: defaultNobatchUserPrompt,
@@ -720,6 +809,7 @@ const defaultApiOpts = {
     model: "llama3.1",
     systemPrompt: defaultSystemPromptPercent,
     llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+    ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
     useBatchFetch: true,
   },
   [OPT_TRANS_OPENROUTER]: {

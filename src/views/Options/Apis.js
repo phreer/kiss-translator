@@ -53,9 +53,12 @@ import {
   defaultSystemPromptLines,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_MAPPING_BY_ID,
+  LLM_OUTPUT_MAPPING_BY_ORDER,
   LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
+  getLlmTemplatePreset,
 } from "../../config";
 import ValidationInput from "../../hooks/ValidationInput";
 
@@ -158,6 +161,20 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     [i18n]
   );
 
+  const llmOutputMappingOptions = useMemo(
+    () => [
+      {
+        value: LLM_OUTPUT_MAPPING_BY_ID,
+        label: i18n("llm_output_mapping_by_id"),
+      },
+      {
+        value: LLM_OUTPUT_MAPPING_BY_ORDER,
+        label: i18n("llm_output_mapping_by_order"),
+      },
+    ],
+    [i18n]
+  );
+
   useEffect(() => {
     if (api) {
       setFormData(api);
@@ -208,11 +225,15 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     };
     const systemPrompt =
       promptMap[e.target.dataset.output] || defaultSystemPromptXml;
+    const preset =
+      getLlmTemplatePreset(formatMap[e.target.dataset.output]) ||
+      getLlmTemplatePreset(LLM_OUTPUT_FORMAT_XML);
     setFormData((prevData) => ({
       ...prevData,
       systemPrompt,
       llmOutputFormat:
         formatMap[e.target.dataset.output] || LLM_OUTPUT_FORMAT_XML,
+      ...preset,
     }));
   };
 
@@ -254,6 +275,13 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     apiType,
     systemPrompt = "",
     llmOutputFormat = LLM_OUTPUT_FORMAT_AUTO,
+    llmInputTemplate = "",
+    llmInputSegmentTemplate = "",
+    llmInputSegmentsSeparator = "",
+    llmOutputTemplate = "",
+    llmOutputSegmentTemplate = "",
+    llmOutputSegmentsSeparator = "",
+    llmOutputMappingMode = LLM_OUTPUT_MAPPING_BY_ID,
     nobatchPrompt = defaultNobatchPrompt,
     nobatchUserPrompt = defaultNobatchUserPrompt,
     subtitlePrompt = "",
@@ -519,6 +547,78 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                   </>
                 }
               />
+              {showMore && (
+                <>
+                  <TextField
+                    size="small"
+                    label={i18n("llm_input_template")}
+                    name="llmInputTemplate"
+                    value={llmInputTemplate}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={8}
+                  />
+                  <TextField
+                    size="small"
+                    label={i18n("llm_input_segment_template")}
+                    name="llmInputSegmentTemplate"
+                    value={llmInputSegmentTemplate}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={6}
+                  />
+                  <TextField
+                    size="small"
+                    label={i18n("llm_input_separator")}
+                    name="llmInputSegmentsSeparator"
+                    value={llmInputSegmentsSeparator}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={4}
+                  />
+                  <TextField
+                    size="small"
+                    label={i18n("llm_output_template")}
+                    name="llmOutputTemplate"
+                    value={llmOutputTemplate}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={8}
+                  />
+                  <TextField
+                    size="small"
+                    label={i18n("llm_output_segment_template")}
+                    name="llmOutputSegmentTemplate"
+                    value={llmOutputSegmentTemplate}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={6}
+                  />
+                  <TextField
+                    size="small"
+                    label={i18n("llm_output_separator")}
+                    name="llmOutputSegmentsSeparator"
+                    value={llmOutputSegmentsSeparator}
+                    onChange={handleChange}
+                    multiline
+                    maxRows={4}
+                  />
+                  <TextField
+                    select
+                    size="small"
+                    label={i18n("llm_output_mapping_mode")}
+                    name="llmOutputMappingMode"
+                    value={llmOutputMappingMode}
+                    onChange={handleChange}
+                  >
+                    {llmOutputMappingOptions.map((item) => (
+                      <MenuItem key={item.value} value={item.value}>
+                        {item.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </>
+              )}
             </>
           ) : (
             <>

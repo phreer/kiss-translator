@@ -38,12 +38,26 @@ import {
   INPUT_PLACE_GLOSSARY,
   defaultSystemPromptXml,
   defaultSystemPromptLines,
+  defaultSystemPromptPercent,
+  defaultLlmInputTemplateJson,
+  defaultLlmInputSegmentTemplateJson,
+  defaultLlmOutputTemplateJson,
+  defaultLlmOutputSegmentTemplateJson,
+  defaultLlmOutputTemplateXml,
+  defaultLlmOutputSegmentTemplateXml,
+  defaultLlmOutputTemplateTextLines,
+  defaultLlmOutputSegmentTemplateTextLines,
+  defaultLlmOutputTemplatePercent,
+  defaultLlmOutputSegmentTemplatePercent,
   INPUT_PLACE_SUMMARY,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_FORMAT_PERCENT,
+  LLM_OUTPUT_MAPPING_BY_ID,
+  LLM_OUTPUT_MAPPING_BY_ORDER,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
+  getLlmTemplatePreset,
   resolveLlmOutputFormat,
 } from "../config";
 import { msAuth } from "../libs/auth";
@@ -72,6 +86,190 @@ import { getDocInfo } from "../libs/docInfo";
 
 const keyMap = new Map();
 const urlMap = new Map();
+
+const TEMPLATE_SEGMENTS_PLACEHOLDER = "{{segments}}";
+
+const jsonTemplateDefaults = {
+  llmInputTemplate: defaultLlmInputTemplateJson,
+  llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
+  llmInputSegmentsSeparator: ",",
+  llmOutputTemplate: defaultLlmOutputTemplateJson,
+  llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplateJson,
+  llmOutputSegmentsSeparator: ",",
+  llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+};
+
+const outputTemplatePresets = [
+  {
+    template: defaultLlmOutputTemplateJson,
+    segmentTemplate: defaultLlmOutputSegmentTemplateJson,
+    format: LLM_OUTPUT_FORMAT_JSON,
+    mappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+  },
+  {
+    template: defaultLlmOutputTemplateXml,
+    segmentTemplate: defaultLlmOutputSegmentTemplateXml,
+    format: LLM_OUTPUT_FORMAT_XML,
+    mappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+  },
+  {
+    template: defaultLlmOutputTemplateTextLines,
+    segmentTemplate: defaultLlmOutputSegmentTemplateTextLines,
+    format: LLM_OUTPUT_FORMAT_TEXTLINES,
+    mappingMode: LLM_OUTPUT_MAPPING_BY_ID,
+  },
+  {
+    template: defaultLlmOutputTemplatePercent,
+    segmentTemplate: defaultLlmOutputSegmentTemplatePercent,
+    format: LLM_OUTPUT_FORMAT_PERCENT,
+    mappingMode: LLM_OUTPUT_MAPPING_BY_ORDER,
+  },
+];
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const toTemplateLiteral = (value, mode) => {
+  if (value == null) {
+    return mode === "json" ? "null" : "";
+  }
+
+  const stringValue = String(value);
+  if (mode === "json") {
+    return JSON.stringify(stringValue);
+  }
+
+  return stringValue;
+};
+
+const renderTemplate = (template, values = {}) =>
+  Object.entries(values).reduce((result, [key, value]) => {
+    result = result.replaceAll(`{{${key}}}`, value ?? "");
+    result = result.replaceAll(
+      `{{${key}|json}}`,
+      toTemplateLiteral(value, "json")
+    );
+    result = result.replaceAll(
+      `{{${key}|raw}}`,
+      toTemplateLiteral(value, "raw")
+    );
+    return result;
+  }, template);
+
+const compactJsonTemplate = (template) => template.replace(/\s+/g, "");
+
+const stripJsonLine = (line) => {
+  if (!line) return line;
+
+  const trimmed = line.trim();
+  if (trimmed === '""' || trimmed === "null") {
+    return "";
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    return trimmed;
+  }
+};
+
+const formatGlossaryLines = (glossary = {}) => {
+  const entries = Object.entries(glossary);
+  if (!entries.length) {
+    return "(none)";
+  }
+
+  return entries.map(([key, value]) => `- ${key}: ${value}`).join("\n");
+};
+
+const renderSegmentsTemplate = ({
+  segments,
+  segmentTemplate,
+  separator,
+  valueBuilder,
+}) =>
+  segments
+    .map((segment, index) =>
+      renderTemplate(segmentTemplate, valueBuilder(segment, index))
+    )
+    .join(separator);
+
+const normalizeLlmTemplates = ({
+  llmOutputFormat,
+  llmInputTemplate,
+  llmInputSegmentTemplate,
+  llmInputSegmentsSeparator,
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
+}) => {
+  const preset = getLlmTemplatePreset(llmOutputFormat) || jsonTemplateDefaults;
+
+  return {
+    llmInputTemplate: llmInputTemplate || preset.llmInputTemplate,
+    llmInputSegmentTemplate:
+      llmInputSegmentTemplate || preset.llmInputSegmentTemplate,
+    llmInputSegmentsSeparator:
+      llmInputSegmentsSeparator ?? preset.llmInputSegmentsSeparator,
+    llmOutputTemplate: llmOutputTemplate || preset.llmOutputTemplate,
+    llmOutputSegmentTemplate:
+      llmOutputSegmentTemplate || preset.llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator:
+      llmOutputSegmentsSeparator ?? preset.llmOutputSegmentsSeparator,
+    llmOutputMappingMode:
+      llmOutputMappingMode ||
+      preset.llmOutputMappingMode ||
+      LLM_OUTPUT_MAPPING_BY_ID,
+  };
+};
+
+const buildTemplateMeta = ({
+  llmOutputFormat,
+  llmInputTemplate,
+  llmInputSegmentTemplate,
+  llmInputSegmentsSeparator,
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
+  systemPrompt,
+}) => {
+  const resolvedFormat = resolveLlmOutputFormat({
+    llmOutputFormat,
+    systemPrompt,
+  });
+
+  return {
+    llmOutputFormat: resolvedFormat,
+    ...normalizeLlmTemplates({
+      llmOutputFormat: resolvedFormat,
+      llmInputTemplate,
+      llmInputSegmentTemplate,
+      llmInputSegmentsSeparator,
+      llmOutputTemplate,
+      llmOutputSegmentTemplate,
+      llmOutputSegmentsSeparator,
+      llmOutputMappingMode,
+    }),
+  };
+};
+
+const detectTemplatePreset = ({
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+}) =>
+  outputTemplatePresets.find(
+    (preset) =>
+      preset.template === llmOutputTemplate &&
+      preset.segmentTemplate === llmOutputSegmentTemplate
+  ) || null;
+
+const hasCustomOutputTemplate = (templateMeta) =>
+  Boolean(
+    templateMeta &&
+      templateMeta.llmOutputTemplate &&
+      templateMeta.llmOutputSegmentTemplate
+  );
 
 // 轮询key/url
 const keyPick = (apiSlug, key = "", cacheMap) => {
@@ -115,6 +313,10 @@ const genSystemPrompt = ({
 export const genUserPrompt = ({
   nobatchUserPrompt,
   useBatchFetch,
+  llmInputTemplate,
+  llmInputSegmentTemplate,
+  llmInputSegmentsSeparator,
+  llmOutputFormat,
   tone,
   glossary = {}, // 规则中的AI专业术语
   aiTerms = "", // 接口中的AI专业术语
@@ -123,27 +325,54 @@ export const genUserPrompt = ({
   fromLang,
   toLang,
   texts,
+  systemPrompt,
   docInfo: { title = "", description = "", summary = "" } = {},
 }) => {
   if (useBatchFetch) {
-    const promptObj = {
-      targetLanguage: toLang,
-      segments: texts.map((text, i) => ({ id: i, text })),
-    };
-
-    title && (promptObj.title = title);
-    description && (promptObj.description = description);
-
     // 合并规则与接口中的AI专业术语
     if (aiTerms) {
       const aiGlossary = parseAITerms(aiTerms);
       glossary = { ...glossary, ...aiGlossary };
     }
 
-    Object.keys(glossary).length !== 0 && (promptObj.glossary = glossary);
-    tone && (promptObj.tone = tone);
+    const templateMeta = buildTemplateMeta({
+      llmOutputFormat,
+      llmInputTemplate,
+      llmInputSegmentTemplate,
+      llmInputSegmentsSeparator,
+      systemPrompt,
+    });
 
-    return JSON.stringify(promptObj);
+    const segments = renderSegmentsTemplate({
+      segments: texts,
+      segmentTemplate: templateMeta.llmInputSegmentTemplate,
+      separator: templateMeta.llmInputSegmentsSeparator,
+      valueBuilder: (text, index) => ({
+        id: index,
+        source_text: text,
+      }),
+    });
+
+    const rendered = renderTemplate(templateMeta.llmInputTemplate, {
+      to_lang: toLang,
+      title,
+      description,
+      summary,
+      glossary,
+      glossary_lines: formatGlossaryLines(glossary),
+      tone,
+      segments,
+    });
+
+    if (templateMeta.llmInputTemplate === defaultLlmInputTemplateJson) {
+      try {
+        return JSON.stringify(JSON.parse(compactJsonTemplate(rendered)));
+      } catch (error) {
+        return rendered;
+      }
+    }
+
+    return rendered;
   }
 
   return nobatchUserPrompt
@@ -250,7 +479,103 @@ const parseAIResByTextLines = (content) =>
 const parseAIResByPercent = (content) =>
   content.split(/\n?\s*%%\s*\n?/).map((segment) => [segment.trim(), ""]);
 
-export const parseAIRes = (raw, useBatchFetch = true, llmOutputFormat) => {
+const compileSegmentTemplateRegex = (segmentTemplate) => {
+  const tokenRegex = /{{(id|translation|source_language)(\|json|\|raw)?}}/g;
+  let cursor = 0;
+  let pattern = "";
+  let match;
+  const fields = [];
+
+  while ((match = tokenRegex.exec(segmentTemplate)) !== null) {
+    const [token, field, modifier = ""] = match;
+    pattern += escapeRegExp(segmentTemplate.slice(cursor, match.index));
+    pattern += field === "id" ? "(\\d+)" : "([\\s\\S]*?)";
+    fields.push({ field, modifier });
+    cursor = match.index + token.length;
+  }
+
+  pattern += escapeRegExp(segmentTemplate.slice(cursor));
+  return { regex: new RegExp(`^${pattern}$`), fields };
+};
+
+const parseWithTemplateBySegments = ({
+  content,
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
+}) => {
+  if (!llmOutputSegmentTemplate) return null;
+
+  let body = content;
+  if (
+    llmOutputTemplate &&
+    llmOutputTemplate.includes(TEMPLATE_SEGMENTS_PLACEHOLDER)
+  ) {
+    const [prefix = "", suffix = ""] = llmOutputTemplate.split(
+      TEMPLATE_SEGMENTS_PLACEHOLDER
+    );
+    if (prefix && body.startsWith(prefix)) {
+      body = body.slice(prefix.length);
+    }
+    if (suffix && body.endsWith(suffix)) {
+      body = body.slice(0, body.length - suffix.length);
+    }
+  }
+
+  const separator = llmOutputSegmentsSeparator ?? "\n";
+  const chunks = separator ? body.split(separator) : [body];
+  const { regex, fields } = compileSegmentTemplateRegex(
+    llmOutputSegmentTemplate
+  );
+  const parsed = [];
+
+  chunks.forEach((chunk, index) => {
+    const trimmed = chunk.trim();
+    if (!trimmed) return;
+
+    const match = trimmed.match(regex);
+    if (!match) {
+      if (llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ORDER) {
+        parsed.push([trimmed, ""]);
+      }
+      return;
+    }
+
+    let id = index;
+    let translation = "";
+    let sourceLanguage = "";
+
+    fields.forEach((field, fieldIndex) => {
+      const rawValue = match[fieldIndex + 1];
+      const normalized =
+        field.modifier === "|json" ? stripJsonLine(rawValue) : rawValue;
+
+      if (field.field === "id") {
+        id = parseInt(normalized, 10);
+      } else if (field.field === "translation") {
+        translation = String(normalized ?? "");
+      } else if (field.field === "source_language") {
+        sourceLanguage = String(normalized ?? "");
+      }
+    });
+
+    if (llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ID) {
+      parsed[id] = [translation, sourceLanguage];
+    } else {
+      parsed.push([translation, sourceLanguage]);
+    }
+  });
+
+  return parsed.filter((item) => item !== undefined);
+};
+
+export const parseAIRes = (
+  raw,
+  useBatchFetch = true,
+  llmOutputFormat,
+  templateMeta = null
+) => {
   if (!raw) {
     return [];
   }
@@ -277,8 +602,41 @@ export const parseAIRes = (raw, useBatchFetch = true, llmOutputFormat) => {
   // return [];
 
   let content = stripMarkdownCodeBlock(raw).trim();
+  if (
+    (!templateMeta || !hasCustomOutputTemplate(templateMeta)) &&
+    (llmOutputFormat === LLM_OUTPUT_FORMAT_AUTO ||
+      llmOutputFormat === undefined ||
+      llmOutputFormat === null)
+  ) {
+    return (
+      parseAIResByJson(content) ||
+      parseAIResByXml(content) ||
+      (content.includes("%%") ? parseAIResByPercent(content) : null) ||
+      parseAIResByTextLines(content)
+    );
+  }
 
-  switch (llmOutputFormat) {
+  const templates = templateMeta
+    ? buildTemplateMeta(templateMeta)
+    : buildTemplateMeta({ llmOutputFormat });
+  const preset = detectTemplatePreset({
+    llmOutputTemplate: templates.llmOutputTemplate,
+    llmOutputSegmentTemplate: templates.llmOutputSegmentTemplate,
+  });
+
+  if (!preset) {
+    return (
+      parseWithTemplateBySegments({
+        content,
+        llmOutputTemplate: templates.llmOutputTemplate,
+        llmOutputSegmentTemplate: templates.llmOutputSegmentTemplate,
+        llmOutputSegmentsSeparator: templates.llmOutputSegmentsSeparator,
+        llmOutputMappingMode: templates.llmOutputMappingMode,
+      }) || []
+    );
+  }
+
+  switch (preset.format) {
     case LLM_OUTPUT_FORMAT_JSON:
       return parseAIResByJson(content) || [];
     case LLM_OUTPUT_FORMAT_XML:
@@ -820,6 +1178,14 @@ export const genTransReq = async ({ reqHook, ...args }) => {
     // userPrompt,
     nobatchPrompt = defaultNobatchPrompt,
     nobatchUserPrompt = defaultNobatchUserPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
+    llmOutputFormat,
     useBatchFetch,
     from,
     to,
@@ -872,6 +1238,10 @@ export const genTransReq = async ({ reqHook, ...args }) => {
       : genUserPrompt({
           nobatchUserPrompt,
           useBatchFetch,
+          llmInputTemplate,
+          llmInputSegmentTemplate,
+          llmInputSegmentsSeparator,
+          llmOutputFormat,
           from,
           to,
           fromLang,
@@ -881,6 +1251,7 @@ export const genTransReq = async ({ reqHook, ...args }) => {
           tone,
           glossary,
           aiTerms,
+          systemPrompt,
         });
   }
 
@@ -915,6 +1286,7 @@ export const genTransReq = async ({ reqHook, ...args }) => {
         {
           ...args,
           defaultSystemPrompt,
+          defaultSystemPromptPercent,
           defaultSystemPromptXml,
           defaultSystemPromptLines,
           defaultSubtitlePrompt,
@@ -959,11 +1331,25 @@ export const parseTransRes = async (
     useBatchFetch,
     llmOutputFormat,
     systemPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
   }
 ) => {
-  const resolvedLlmOutputFormat = getLlmOutputFormat({
+  const templateMeta = buildTemplateMeta({
     llmOutputFormat,
     systemPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
   });
 
   // 执行 response hook
@@ -1055,7 +1441,8 @@ export const parseTransRes = async (
       return parseAIRes(
         modelMsg?.content,
         useBatchFetch,
-        resolvedLlmOutputFormat
+        templateMeta.llmOutputFormat,
+        templateMeta
       );
     case OPT_TRANS_GEMINI:
       modelMsg = res?.candidates?.[0]?.content;
@@ -1065,7 +1452,8 @@ export const parseTransRes = async (
       return parseAIRes(
         modelMsg?.parts?.[0]?.text ?? "",
         useBatchFetch,
-        resolvedLlmOutputFormat
+        templateMeta.llmOutputFormat,
+        templateMeta
       );
     case OPT_TRANS_CLAUDE:
       modelMsg = { role: res?.role, content: res?.content?.text };
@@ -1078,7 +1466,8 @@ export const parseTransRes = async (
       return parseAIRes(
         res?.content?.[0]?.text ?? "",
         useBatchFetch,
-        resolvedLlmOutputFormat
+        templateMeta.llmOutputFormat,
+        templateMeta
       );
     case OPT_TRANS_CLOUDFLAREAI:
       return [[res?.result?.translated_text]];
@@ -1101,7 +1490,8 @@ export const parseTransRes = async (
       return parseAIRes(
         modelMsg?.content,
         useBatchFetch,
-        resolvedLlmOutputFormat
+        templateMeta.llmOutputFormat,
+        templateMeta
       );
     case OPT_TRANS_CUSTOMIZE:
       if (useBatchFetch) {
@@ -1178,6 +1568,13 @@ export async function* handleTranslate(
       httpTimeout,
       llmOutputFormat: apiSetting.llmOutputFormat,
       systemPrompt: apiSetting.systemPrompt,
+      llmInputTemplate: apiSetting.llmInputTemplate,
+      llmInputSegmentTemplate: apiSetting.llmInputSegmentTemplate,
+      llmInputSegmentsSeparator: apiSetting.llmInputSegmentsSeparator,
+      llmOutputTemplate: apiSetting.llmOutputTemplate,
+      llmOutputSegmentTemplate: apiSetting.llmOutputSegmentTemplate,
+      llmOutputSegmentsSeparator: apiSetting.llmOutputSegmentsSeparator,
+      llmOutputMappingMode: apiSetting.llmOutputMappingMode,
     });
   } else {
     const response = await fetchData(input, init, {
@@ -1229,14 +1626,28 @@ async function* handleTranslateStreamInternal(
     httpTimeout,
     llmOutputFormat,
     systemPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
   }
 ) {
   const results = new Array(texts.length).fill(null);
   let fullContent = "";
   const processedIds = new Set();
-  const resolvedLlmOutputFormat = getLlmOutputFormat({
+  const templateMeta = buildTemplateMeta({
     llmOutputFormat,
     systemPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
   });
 
   const jsonParser = createStreamingJsonParser();
@@ -1244,7 +1655,7 @@ async function* handleTranslateStreamInternal(
   let formatDetected = false;
 
   const parseStreamSegments = () => {
-    switch (resolvedLlmOutputFormat) {
+    switch (templateMeta.llmOutputFormat) {
       case LLM_OUTPUT_FORMAT_XML:
         return parseStreamingXmlSegments(fullContent, processedIds);
       case LLM_OUTPUT_FORMAT_TEXTLINES:
@@ -1275,7 +1686,7 @@ async function* handleTranslateStreamInternal(
 
           if (!formatDetected) {
             const { isJson, detected } = detectStreamJsonFormat(
-              resolvedLlmOutputFormat,
+              templateMeta.llmOutputFormat,
               fullContent
             );
             if (detected) {
@@ -1319,7 +1730,12 @@ async function* handleTranslateStreamInternal(
   // 最终再解析一次，捕获可能遗漏的段落
   const hasEmpty = results.some((r) => !r);
   if (hasEmpty) {
-    const parsed = parseAIRes(fullContent, true, resolvedLlmOutputFormat);
+    const parsed = parseAIRes(
+      fullContent,
+      true,
+      templateMeta.llmOutputFormat,
+      templateMeta
+    );
     for (let i = 0; i < texts.length && i < parsed.length; i++) {
       if (!results[i]) {
         results[i] = parsed[i];
