@@ -217,6 +217,13 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     });
   };
 
+  const handleRestoreDefaultTranslationRules = () => {
+    setFormData((prevData) => ({
+      ...prevData,
+      translationRules: defaultLlmRulesPrompt,
+    }));
+  };
+
   const handleSave = () => {
     // 过滤掉 api 对象中不存在的字段
     // const updatedFields = Object.keys(formData).reduce((acc, key) => {
@@ -512,16 +519,31 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                   </MenuItem>
                 ))}
               </TextField>
-              <TextField
-                size="small"
-                label={"Translation Rules"}
-                name="translationRules"
-                value={translationRules}
-                onChange={handleChange}
-                multiline
-                maxRows={10}
-                helperText={i18n("system_prompt_helper_2")}
-              />
+              <Box>
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="center"
+                  sx={{ marginBottom: 1 }}
+                >
+                  <Typography variant="subtitle2">Translation Rules</Typography>
+                  <Button
+                    size="small"
+                    onClick={handleRestoreDefaultTranslationRules}
+                  >
+                    {i18n("restore_default")}
+                  </Button>
+                </Stack>
+                <TextField
+                  size="small"
+                  name="translationRules"
+                  value={translationRules}
+                  onChange={handleChange}
+                  multiline
+                  maxRows={10}
+                  helperText={i18n("system_prompt_helper_2")}
+                />
+              </Box>
               <Alert severity="success">
                 <Box component="div" sx={{ fontWeight: 600, marginBottom: 1 }}>
                   Final Prompt Preview
