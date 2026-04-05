@@ -77,14 +77,14 @@ describe("resolveLlmOutputFormat", () => {
 });
 
 describe("migrateLegacyLlmApi", () => {
-  it("backfills translationRules from legacy systemPrompt without parsing it", () => {
+  it("backfills translationRules with default rules when missing", () => {
     const migrated = migrateLegacyLlmApi({
       useBatchFetch: true,
       llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
       systemPrompt: "Keep translations concise.",
     });
 
-    expect(migrated.translationRules).toBe("Keep translations concise.");
+    expect(migrated.translationRules).toBe(defaultLlmRulesPrompt);
     expect(migrated.systemPrompt).toBe("Keep translations concise.");
     expect(migrated.llmInputTemplate).toBe(defaultLlmInputTemplatePercent);
     expect(migrated.llmOutputTemplate).toBe(defaultLlmOutputTemplatePercent);
@@ -111,7 +111,7 @@ describe("migrateLegacyLlmApi", () => {
     ]);
 
     expect(result.changed).toBe(true);
-    expect(result.apis[0].translationRules).toBe("Use short sentences.");
+    expect(result.apis[0].translationRules).toBe(defaultLlmRulesPrompt);
   });
 });
 
@@ -177,7 +177,7 @@ describe("parseAIRes", () => {
     expect(prompt).toContain("\n%%\n[1]\nWorld!");
   });
 
-  it("prefers translationRules over legacy systemPrompt", () => {
+  it("uses translationRules instead of legacy systemPrompt", () => {
     const prompt = buildBatchSystemPrompt({
       translationRules: "Use friendly marketing tone.",
       systemPrompt: "legacy protocol prompt",
@@ -205,6 +205,7 @@ describe("parseAIRes", () => {
 
   it("falls back to default rules when translationRules is missing", () => {
     const preview = getLlmPromptPreview({
+      systemPrompt: "legacy protocol prompt",
       llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
       ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
     });

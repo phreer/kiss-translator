@@ -366,7 +366,7 @@ export const buildBatchSystemPrompt = ({
   templateMeta,
 }) => {
   const rulesPrompt = genSystemPrompt({
-    systemPrompt: translationRules || systemPrompt || defaultLlmRulesPrompt,
+    systemPrompt: translationRules || defaultLlmRulesPrompt,
     tone,
     from,
     to,
@@ -416,7 +416,7 @@ export const getLlmPromptPreview = ({
       llmOutputMappingMode: templateMeta.llmOutputMappingMode,
     }),
     rulesPrompt: genSystemPrompt({
-      systemPrompt: translationRules || systemPrompt || defaultLlmRulesPrompt,
+      systemPrompt: translationRules || defaultLlmRulesPrompt,
       tone: SAMPLE_PROMPT_CONTEXT.tone,
       from: "en",
       to: "zh-CN",

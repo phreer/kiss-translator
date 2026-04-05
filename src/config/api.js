@@ -589,8 +589,7 @@ export const migrateLegacyLlmApi = (api = {}) => {
 
   return {
     ...api,
-    translationRules:
-      api.translationRules || api.systemPrompt || defaultLlmRulesPrompt,
+    translationRules: api.translationRules || defaultLlmRulesPrompt,
     llmOutputFormat:
       nextPreset === LLM_TEMPLATE_PRESET_CUSTOM
         ? api.llmOutputFormat
