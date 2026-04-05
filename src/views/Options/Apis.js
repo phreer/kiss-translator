@@ -11,7 +11,7 @@ import Typography from "@mui/material/Typography";
 import Accordion from "@mui/material/Accordion";
 import AccordionSummary from "@mui/material/AccordionSummary";
 import AccordionDetails from "@mui/material/AccordionDetails";
-import StarIcon from '@mui/icons-material/Star';
+import StarIcon from "@mui/icons-material/Star";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AddIcon from "@mui/icons-material/Add";
 import Alert from "@mui/material/Alert";
@@ -50,6 +50,10 @@ import {
   defaultSystemPrompt,
   defaultSystemPromptXml,
   defaultSystemPromptLines,
+  LLM_OUTPUT_FORMAT_AUTO,
+  LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_XML,
+  LLM_OUTPUT_FORMAT_TEXTLINES,
 } from "../../config";
 import ValidationInput from "../../hooks/ValidationInput";
 
@@ -118,6 +122,35 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
   const [showMore, setShowMore] = useState(false);
   const confirm = useConfirm();
 
+  const llmOutputFormatOptions = useMemo(
+    () => [
+      {
+        value: LLM_OUTPUT_FORMAT_AUTO,
+        label: i18n("llm_output_format_auto"),
+        preview:
+          'Auto detection tries JSON first, then XML, then text lines. Example: {"translations":[{"id":0,"text":"你好"}]}',
+      },
+      {
+        value: LLM_OUTPUT_FORMAT_JSON,
+        label: i18n("llm_output_format_json"),
+        preview:
+          '{"translations":[{"id":0,"text":"你好","sourceLanguage":"en"},{"id":1,"text":"世界","sourceLanguage":"en"}]}',
+      },
+      {
+        value: LLM_OUTPUT_FORMAT_XML,
+        label: i18n("llm_output_format_xml"),
+        preview:
+          '<root>\n  <t id="0" sourceLanguage="en">你好</t>\n  <t id="1" sourceLanguage="en">世界</t>\n</root>',
+      },
+      {
+        value: LLM_OUTPUT_FORMAT_TEXTLINES,
+        label: i18n("llm_output_format_textlines"),
+        preview: "0 | 你好\n1 | 世界",
+      },
+    ],
+    [i18n]
+  );
+
   useEffect(() => {
     if (api) {
       setFormData(api);
@@ -159,11 +192,18 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
       xml: defaultSystemPromptXml,
       textlines: defaultSystemPromptLines,
     };
+    const formatMap = {
+      json: LLM_OUTPUT_FORMAT_JSON,
+      xml: LLM_OUTPUT_FORMAT_XML,
+      textlines: LLM_OUTPUT_FORMAT_TEXTLINES,
+    };
     const systemPrompt =
       promptMap[e.target.dataset.output] || defaultSystemPromptXml;
     setFormData((prevData) => ({
       ...prevData,
       systemPrompt,
+      llmOutputFormat:
+        formatMap[e.target.dataset.output] || LLM_OUTPUT_FORMAT_XML,
     }));
   };
 
@@ -204,6 +244,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     model = "",
     apiType,
     systemPrompt = "",
+    llmOutputFormat = LLM_OUTPUT_FORMAT_AUTO,
     nobatchPrompt = defaultNobatchPrompt,
     nobatchUserPrompt = defaultNobatchUserPrompt,
     subtitlePrompt = "",
@@ -237,6 +278,10 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     aiTerms = "",
   } = formData;
 
+  const selectedOutputFormat =
+    llmOutputFormatOptions.find((item) => item.value === llmOutputFormat) ||
+    llmOutputFormatOptions[0];
+
   const keyHelper = useMemo(
     () => (API_SPE_TYPES.mulkeys.has(apiType) ? i18n("mulkeys_help") : ""),
     [apiType, i18n]
@@ -247,7 +292,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     "gpt-5.4-nano",
     "gemini-3.1-flash-lite-preview",
     "grok-4.20-beta-0309-non-reasoning",
-  ]
+  ];
 
   return (
     <Stack spacing={3}>
@@ -320,8 +365,8 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
         <>
           <Box>
             <Grid container spacing={2} columns={12}>
-              {
-                apiType === OPT_TRANS_EPHONEAI ? <Grid item xs={12} sm={12} md={6} lg={3}>
+              {apiType === OPT_TRANS_EPHONEAI ? (
+                <Grid item xs={12} sm={12} md={6} lg={3}>
                   <ReusableAutocomplete
                     freeSolo
                     size="small"
@@ -332,7 +377,9 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                     value={model}
                     onChange={handleChange}
                   />
-                </Grid> : <Grid item xs={12} sm={12} md={6} lg={3}>
+                </Grid>
+              ) : (
+                <Grid item xs={12} sm={12} md={6} lg={3}>
                   {/* todo： 改成 ReusableAutocomplete 可选择和填写模型 */}
                   <TextField
                     size="small"
@@ -343,7 +390,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                     onChange={handleChange}
                   />
                 </Grid>
-              }
+              )}
               <Grid item xs={12} sm={12} md={6} lg={3}>
                 <ReusableAutocomplete
                   freeSolo
@@ -388,46 +435,74 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
           </Box>
 
           {useBatchFetch ? (
-            <TextField
-              size="small"
-              label={"Batch System Prompt"}
-              name="systemPrompt"
-              value={systemPrompt}
-              onChange={handleChange}
-              multiline
-              maxRows={10}
-              helperText={
-                <>
-                  {i18n("system_prompt_helper_1")}
-                  <Link
-                    component="button"
-                    sx={{ margin: "0 1em" }}
-                    data-output="json"
-                    onClick={handleUpdateSystemPrompt}
-                  >
-                    {i18n("json_output")}
-                  </Link>
-                  <Link
-                    component="button"
-                    sx={{ margin: "0 1em" }}
-                    data-output="xml"
-                    onClick={handleUpdateSystemPrompt}
-                  >
-                    {i18n("xml_output")}
-                  </Link>
-                  <Link
-                    component="button"
-                    sx={{ margin: "0 1em" }}
-                    data-output="textlines"
-                    onClick={handleUpdateSystemPrompt}
-                  >
-                    {i18n("textlines_output")}
-                  </Link>
-                  <br />
-                  {i18n("system_prompt_helper_2")}
-                </>
-              }
-            />
+            <>
+              <TextField
+                select
+                size="small"
+                label={i18n("llm_output_format")}
+                name="llmOutputFormat"
+                value={llmOutputFormat}
+                onChange={handleChange}
+                helperText={i18n("llm_output_format_helper")}
+              >
+                {llmOutputFormatOptions.map((item) => (
+                  <MenuItem key={item.value} value={item.value}>
+                    {item.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <Alert severity="info">
+                <Box component="div" sx={{ fontWeight: 600, marginBottom: 1 }}>
+                  {i18n("llm_output_preview")}: {selectedOutputFormat.label}
+                </Box>
+                <Box
+                  component="pre"
+                  sx={{ margin: 0, overflowX: "auto", whiteSpace: "pre-wrap" }}
+                >
+                  {selectedOutputFormat.preview}
+                </Box>
+              </Alert>
+              <TextField
+                size="small"
+                label={"Batch System Prompt"}
+                name="systemPrompt"
+                value={systemPrompt}
+                onChange={handleChange}
+                multiline
+                maxRows={10}
+                helperText={
+                  <>
+                    {i18n("system_prompt_helper_1")}
+                    <Link
+                      component="button"
+                      sx={{ margin: "0 1em" }}
+                      data-output="json"
+                      onClick={handleUpdateSystemPrompt}
+                    >
+                      {i18n("json_output")}
+                    </Link>
+                    <Link
+                      component="button"
+                      sx={{ margin: "0 1em" }}
+                      data-output="xml"
+                      onClick={handleUpdateSystemPrompt}
+                    >
+                      {i18n("xml_output")}
+                    </Link>
+                    <Link
+                      component="button"
+                      sx={{ margin: "0 1em" }}
+                      data-output="textlines"
+                      onClick={handleUpdateSystemPrompt}
+                    >
+                      {i18n("textlines_output")}
+                    </Link>
+                    <br />
+                    {i18n("system_prompt_helper_2")}
+                  </>
+                }
+              />
+            </>
           ) : (
             <>
               <TextField
@@ -993,11 +1068,9 @@ export default function Apis() {
                 onClick={() => handleMenuItemClick(apiOption.type)}
               >
                 {apiOption.label}
-                {
-                  API_SPE_TYPES.sponsors.has(apiOption.type) && (
-                    <StarIcon color="warning" sx={{ marginLeft: "0.2em" }} />
-                  )
-                }
+                {API_SPE_TYPES.sponsors.has(apiOption.type) && (
+                  <StarIcon color="warning" sx={{ marginLeft: "0.2em" }} />
+                )}
               </MenuItem>
             ))}
           </Menu>
