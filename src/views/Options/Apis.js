@@ -51,6 +51,7 @@ import {
   OPT_TRANS_AZUREAI,
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
+  defaultLlmRulesPrompt,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_TEMPLATE_PRESET_CUSTOM,
   LLM_OUTPUT_FORMAT_JSON,
@@ -133,29 +134,22 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
       {
         value: LLM_OUTPUT_FORMAT_JSON,
         label: i18n("llm_output_format_json"),
-        preview:
-          '{"translations":[{"id":0,"text":"你好","sourceLanguage":"en"},{"id":1,"text":"世界","sourceLanguage":"en"}]}',
       },
       {
         value: LLM_OUTPUT_FORMAT_XML,
         label: i18n("llm_output_format_xml"),
-        preview:
-          '<root>\n  <t id="0" sourceLanguage="en">你好</t>\n  <t id="1" sourceLanguage="en">世界</t>\n</root>',
       },
       {
         value: LLM_OUTPUT_FORMAT_TEXTLINES,
         label: i18n("llm_output_format_textlines"),
-        preview: "0 | 你好\n1 | 世界",
       },
       {
         value: LLM_OUTPUT_FORMAT_PERCENT,
         label: i18n("llm_output_format_percent"),
-        preview: "你好\n%%\n世界",
       },
       {
         value: LLM_TEMPLATE_PRESET_CUSTOM,
         label: i18n("custom_option") || "Custom",
-        preview: i18n("llm_output_format_helper"),
       },
     ],
     [i18n]
@@ -259,6 +253,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     key = "",
     model = "",
     apiType,
+    translationRules = defaultLlmRulesPrompt,
     systemPrompt = "",
     llmTemplatePreset = LLM_OUTPUT_FORMAT_XML,
     llmOutputFormat = LLM_OUTPUT_FORMAT_AUTO,
@@ -305,6 +300,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
   const promptPreview = useMemo(
     () =>
       getLlmPromptPreview({
+        translationRules,
         systemPrompt,
         llmOutputFormat,
         llmInputTemplate,
@@ -317,6 +313,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
       }),
     [
       systemPrompt,
+      translationRules,
       llmOutputFormat,
       llmInputTemplate,
       llmInputSegmentTemplate,
@@ -327,14 +324,6 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
       llmOutputMappingMode,
     ]
   );
-
-  const currentTemplatePreset =
-    promptPreview.preset || llmTemplatePreset || LLM_TEMPLATE_PRESET_CUSTOM;
-
-  const selectedOutputFormat =
-    llmOutputFormatOptions.find(
-      (item) => item.value === currentTemplatePreset
-    ) || llmOutputFormatOptions[0];
 
   const templateWarnings = useMemo(
     () =>
@@ -523,22 +512,11 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                   </MenuItem>
                 ))}
               </TextField>
-              <Alert severity="info">
-                <Box component="div" sx={{ fontWeight: 600, marginBottom: 1 }}>
-                  {i18n("llm_output_preview")}: {selectedOutputFormat.label}
-                </Box>
-                <Box
-                  component="pre"
-                  sx={{ margin: 0, overflowX: "auto", whiteSpace: "pre-wrap" }}
-                >
-                  {selectedOutputFormat.preview}
-                </Box>
-              </Alert>
               <TextField
                 size="small"
                 label={"Translation Rules"}
-                name="systemPrompt"
-                value={systemPrompt}
+                name="translationRules"
+                value={translationRules}
                 onChange={handleChange}
                 multiline
                 maxRows={10}

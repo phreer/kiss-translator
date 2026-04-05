@@ -11,6 +11,7 @@ import {
   DEFAULT_SETTING,
   KV_SETTING_KEY,
   MSG_SET_LOGLEVEL,
+  migrateLegacyLlmApis,
 } from "../config";
 import { useStorage } from "./Storage";
 import { debounceSyncMeta } from "../libs/storage";
@@ -43,6 +44,23 @@ export function SettingProvider({ children, context }) {
       }));
     }
   }, [setting?.darkMode, update]);
+
+  useEffect(() => {
+    const transApis = setting?.transApis;
+    if (!Array.isArray(transApis) || transApis.length === 0) {
+      return;
+    }
+
+    const { changed, apis } = migrateLegacyLlmApis(transApis);
+    if (!changed) {
+      return;
+    }
+
+    update((currentSetting) => ({
+      ...currentSetting,
+      transApis: apis,
+    }));
+  }, [setting?.transApis, update]);
 
   useEffect(() => {
     if (!isOptionsPage) return;

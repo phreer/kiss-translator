@@ -354,6 +354,7 @@ const buildProtocolAppendix = (templateMeta) => {
 };
 
 export const buildBatchSystemPrompt = ({
+  translationRules,
   systemPrompt,
   tone,
   from,
@@ -365,7 +366,7 @@ export const buildBatchSystemPrompt = ({
   templateMeta,
 }) => {
   const rulesPrompt = genSystemPrompt({
-    systemPrompt: systemPrompt || defaultLlmRulesPrompt,
+    systemPrompt: translationRules || systemPrompt || defaultLlmRulesPrompt,
     tone,
     from,
     to,
@@ -379,6 +380,7 @@ export const buildBatchSystemPrompt = ({
 };
 
 export const getLlmPromptPreview = ({
+  translationRules,
   systemPrompt,
   llmOutputFormat,
   llmInputTemplate,
@@ -414,7 +416,7 @@ export const getLlmPromptPreview = ({
       llmOutputMappingMode: templateMeta.llmOutputMappingMode,
     }),
     rulesPrompt: genSystemPrompt({
-      systemPrompt: systemPrompt || defaultLlmRulesPrompt,
+      systemPrompt: translationRules || systemPrompt || defaultLlmRulesPrompt,
       tone: SAMPLE_PROMPT_CONTEXT.tone,
       from: "en",
       to: "zh-CN",
@@ -1374,6 +1376,7 @@ export const genTransReq = async ({ reqHook, ...args }) => {
     apiType,
     apiSlug,
     key,
+    translationRules,
     systemPrompt,
     subtitlePrompt,
     // userPrompt,
@@ -1426,6 +1429,7 @@ export const genTransReq = async ({ reqHook, ...args }) => {
         })
       : useBatchFetch
         ? buildBatchSystemPrompt({
+            translationRules,
             systemPrompt,
             from,
             to,
@@ -1443,6 +1447,7 @@ export const genTransReq = async ({ reqHook, ...args }) => {
               llmOutputSegmentTemplate,
               llmOutputSegmentsSeparator,
               llmOutputMappingMode,
+              translationRules,
               systemPrompt,
             }),
           })

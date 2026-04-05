@@ -45,12 +45,16 @@ import {
   defaultLlmInputSegmentTemplatePercent,
   defaultLlmOutputTemplatePercent,
   defaultLlmOutputSegmentTemplatePercent,
+  defaultLlmInputTemplateJson,
+  defaultLlmOutputTemplateXml,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_MAPPING_BY_ORDER,
   LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   LLM_OUTPUT_FORMAT_XML,
+  migrateLegacyLlmApi,
+  migrateLegacyLlmApis,
   resolveLlmOutputFormat,
   getLlmTemplatePreset,
 } from "../config";
@@ -72,10 +76,50 @@ describe("resolveLlmOutputFormat", () => {
   });
 });
 
+describe("migrateLegacyLlmApi", () => {
+  it("backfills translationRules from legacy systemPrompt without parsing it", () => {
+    const migrated = migrateLegacyLlmApi({
+      useBatchFetch: true,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+      systemPrompt: "Keep translations concise.",
+    });
+
+    expect(migrated.translationRules).toBe("Keep translations concise.");
+    expect(migrated.systemPrompt).toBe("Keep translations concise.");
+    expect(migrated.llmInputTemplate).toBe(defaultLlmInputTemplatePercent);
+    expect(migrated.llmOutputTemplate).toBe(defaultLlmOutputTemplatePercent);
+  });
+
+  it("backfills templates for preset-based APIs missing template fields", () => {
+    const migrated = migrateLegacyLlmApi({
+      useBatchFetch: true,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
+      systemPrompt: defaultLlmRulesPrompt,
+    });
+
+    expect(migrated.llmInputTemplate).toBe(defaultLlmInputTemplateJson);
+    expect(migrated.llmOutputTemplate).toBe(defaultLlmOutputTemplateXml);
+  });
+
+  it("migrates api arrays only when needed", () => {
+    const result = migrateLegacyLlmApis([
+      {
+        useBatchFetch: true,
+        llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+        systemPrompt: "Use short sentences.",
+      },
+    ]);
+
+    expect(result.changed).toBe(true);
+    expect(result.apis[0].translationRules).toBe("Use short sentences.");
+  });
+});
+
 describe("parseAIRes", () => {
   it("builds final batch system prompt with protocol appendix", () => {
     const prompt = buildBatchSystemPrompt({
-      systemPrompt: defaultLlmRulesPrompt,
+      translationRules: defaultLlmRulesPrompt,
+      systemPrompt: "legacy system prompt",
       tone: "neutral",
       from: "en",
       to: "zh-CN",
@@ -102,7 +146,8 @@ describe("parseAIRes", () => {
 
   it("returns prompt preview for preset templates", () => {
     const preview = getLlmPromptPreview({
-      systemPrompt: defaultLlmRulesPrompt,
+      translationRules: defaultLlmRulesPrompt,
+      systemPrompt: "legacy system prompt",
       llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
       ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
     });
@@ -130,6 +175,43 @@ describe("parseAIRes", () => {
     expect(prompt).toContain("Target Language: zh-CN");
     expect(prompt).toContain("[0]\nHello.");
     expect(prompt).toContain("\n%%\n[1]\nWorld!");
+  });
+
+  it("prefers translationRules over legacy systemPrompt", () => {
+    const prompt = buildBatchSystemPrompt({
+      translationRules: "Use friendly marketing tone.",
+      systemPrompt: "legacy protocol prompt",
+      tone: "neutral",
+      from: "en",
+      to: "zh-CN",
+      fromLang: "en",
+      toLang: "zh-CN",
+      texts: ["Hello"],
+      docInfo: {},
+      templateMeta: {
+        llmInputTemplate: defaultLlmInputTemplatePercent,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplatePercent,
+        llmInputSegmentsSeparator: "\n%%\n",
+        llmOutputTemplate: defaultLlmOutputTemplatePercent,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplatePercent,
+        llmOutputSegmentsSeparator: "\n%%\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ORDER,
+      },
+    });
+
+    expect(prompt).toContain("Use friendly marketing tone.");
+    expect(prompt).not.toContain("legacy protocol prompt");
+  });
+
+  it("falls back to default rules when translationRules is missing", () => {
+    const preview = getLlmPromptPreview({
+      llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+      ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
+    });
+
+    expect(preview.rulesPrompt).toContain(
+      "Act as a precise translation engine."
+    );
   });
 
   it("parses json explicitly", () => {

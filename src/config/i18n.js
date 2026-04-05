@@ -2290,13 +2290,6 @@ export const I18N = {
     ja: `%% 区切り`,
     ko: `%% 구분`,
   },
-  llm_output_preview: {
-    zh: `期望输出示例`,
-    en: `Expected Output Preview`,
-    zh_TW: `預期輸出示例`,
-    ja: `想定出力プレビュー`,
-    ko: `예상 출력 미리보기`,
-  },
   llm_input_template: {
     zh: `LLM 输入模板`,
     en: `LLM Input Template`,

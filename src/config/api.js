@@ -549,6 +549,69 @@ export const resolveLlmOutputFormat = ({ llmOutputFormat } = {}) => {
   return LLM_OUTPUT_FORMAT_AUTO;
 };
 
+export const migrateLegacyLlmApi = (api = {}) => {
+  if (!api?.useBatchFetch) {
+    return api;
+  }
+
+  const preset = detectLlmTemplatePreset({
+    llmOutputFormat: api.llmOutputFormat,
+    llmInputTemplate: api.llmInputTemplate,
+    llmInputSegmentTemplate: api.llmInputSegmentTemplate,
+    llmInputSegmentsSeparator: api.llmInputSegmentsSeparator,
+    llmOutputTemplate: api.llmOutputTemplate,
+    llmOutputSegmentTemplate: api.llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator: api.llmOutputSegmentsSeparator,
+    llmOutputMappingMode: api.llmOutputMappingMode,
+  });
+
+  const needsTemplateBackfill =
+    preset !== LLM_TEMPLATE_PRESET_CUSTOM &&
+    (!api.llmInputTemplate || !api.llmOutputTemplate);
+
+  const needsTranslationRulesBackfill = !api.translationRules;
+
+  if (!needsTemplateBackfill && !needsTranslationRulesBackfill) {
+    return api;
+  }
+
+  const fallbackFormat =
+    preset !== LLM_TEMPLATE_PRESET_CUSTOM
+      ? preset
+      : resolveLlmOutputFormat({ llmOutputFormat: api.llmOutputFormat }) ||
+        LLM_OUTPUT_FORMAT_XML;
+
+  const nextPreset =
+    fallbackFormat === LLM_OUTPUT_FORMAT_AUTO
+      ? LLM_OUTPUT_FORMAT_XML
+      : fallbackFormat;
+  const templatePreset = getLlmTemplatePreset(nextPreset);
+
+  return {
+    ...api,
+    translationRules:
+      api.translationRules || api.systemPrompt || defaultLlmRulesPrompt,
+    llmOutputFormat:
+      nextPreset === LLM_TEMPLATE_PRESET_CUSTOM
+        ? api.llmOutputFormat
+        : nextPreset,
+    ...(templatePreset || {}),
+  };
+};
+
+export const migrateLegacyLlmApis = (apis = []) => {
+  let changed = false;
+  const nextApis = apis.map((api) => {
+    const migrated = migrateLegacyLlmApi(api);
+    if (migrated !== api) {
+      changed = true;
+    }
+    return migrated;
+  });
+
+  return { changed, apis: nextApis };
+};
+
 // const defaultSubtitlePrompt = `Goal: Convert raw subtitle event JSON into a clean, sentence-based JSON array.
 
 // Output (valid JSON array, output ONLY this array):
@@ -617,6 +680,7 @@ const defaultApi = {
   url: "",
   key: "",
   model: "", // 模型名称
+  translationRules: defaultLlmRulesPrompt,
   systemPrompt: defaultLlmRulesPrompt,
   llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
   llmInputTemplate: defaultLlmInputTemplateJson,
