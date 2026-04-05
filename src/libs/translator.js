@@ -22,7 +22,6 @@ import {
   debounce,
   scheduleIdle,
   genEventName,
-  truncateWords,
   escapeHTML,
   parseAITerms,
 } from "./utils";

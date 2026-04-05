@@ -25,6 +25,7 @@ export const LLM_OUTPUT_FORMAT_JSON = "json";
 export const LLM_OUTPUT_FORMAT_XML = "xml";
 export const LLM_OUTPUT_FORMAT_TEXTLINES = "textlines";
 export const LLM_OUTPUT_FORMAT_PERCENT = "percent";
+export const LLM_TEMPLATE_PRESET_CUSTOM = "custom";
 export const LLM_OUTPUT_MAPPING_BY_ID = "by_id";
 export const LLM_OUTPUT_MAPPING_BY_ORDER = "by_order";
 export const LLM_OUTPUT_FORMAT_ALL = [
@@ -397,149 +398,24 @@ Source Text: ${INPUT_PLACE_TEXT}
 
 Translated Text:`;
 
-export const defaultSystemPrompt = `Act as a translation API. Output a single raw JSON object only. No extra text or fences.
+export const defaultLlmRulesPrompt = `Act as a precise translation engine.
 
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output:
-{"translations":[{"id":1,"text":"...","sourceLanguage":"<detected>"}]}
+Translate all provided source segments into ${INPUT_PLACE_TO_LANG}.
 
 Rules:
-1.  Use title/description for context only; do not output them.
-2.  Keep id, order, and count of segments.
-3.  Preserve whitespace, HTML entities, and all HTML-like tags (e.g., <i1>, <a1>). Translate inner text only.
-4.  Highest priority: Follow 'glossary'. Use value for translation; if value is "", keep the key.
-5.  Do not translate: content in <code>, <pre>, text enclosed in backticks, or placeholders like {1}, {{1}}, [1], [[1]].
-6.  Apply the specified tone to the translation.
-7.  Detect sourceLanguage for each segment.
-8.  Return empty or unchanged inputs as is.
+1. Preserve HTML tags, placeholders, entities, protected text, and whitespace structure unless translation naturally requires punctuation changes.
+2. Follow the glossary strictly. If a glossary value is empty, keep the original term.
+3. Use the provided title, description, and summary only as context. Do not repeat them in the output.
+4. Apply the requested tone: ${INPUT_PLACE_TONE}.
+5. Return only the translated result that matches the protocol appendix. No commentary or markdown fences.`;
 
-Example:
-Input: {"targetLanguage":"zh-CN","segments":[{"id":1,"text":"A <b>React</b> component."}],"glossary":{"component":"组件","React":""}}
-Output: {"translations":[{"id":1,"text":"一个<b>React</b>组件","sourceLanguage":"en"}]}
+export const defaultSystemPrompt = defaultLlmRulesPrompt;
 
-Fail-safe: On any error, return {"translations":[]}.`;
+export const defaultSystemPromptXml = defaultLlmRulesPrompt;
 
-export const defaultSystemPromptXml = `Act as a translation API. Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
+export const defaultSystemPromptLines = defaultLlmRulesPrompt;
 
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output Format:
-<root>
-    <t id="0" sourceLanguage="<detected_source_lang>">Translated text content...</t>
-    <t id="1" sourceLanguage="<detected_source_lang>">Translated text content...</t>
-</root>
-
-Rules:
-1.  **Strict Format**: Output ONLY the <root> element and its children. Do not include "xml" version declarations or markdown code blocks.
-2.  **Structure**: Maintain the exact "id" from the input in the "id" attribute. Detect the source language for the "sourceLanguage" attribute.
-3.  **HTML & Whitespace**: Preserve all HTML tags (e.g., <b>, <span>, <br>) and whitespace exactly as they appear in the structure. Only translate the text content inside them.
-4.  **Glossary**: Highest priority. Use the glossary value for translation. If the value is "", keep the source term as is.
-5.  **Do Not Translate**: Content inside <code>, <pre>, text in backticks ("code"), and placeholders like {1}, {{1}}, [1], [[1]].
-6.  **Context**: Use the "title" and "description" fields to understand the context for better translation accuracy, but do not output them.
-7.  **Tone**: Apply the specified "tone" (formal/casual).
-
-Example:
-Input:
-{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello <b>World</b>!"}],"glossary":{"World":"世界"},"tone":"formal"}
-
-Output:
-<root>
-    <t id="0" sourceLanguage="en">你好 <b>世界</b>！</t>
-</root>`;
-
-export const defaultSystemPromptLines = `Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
-
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output Format:
-<id> | <Translation for Segment>
-<id> | <Translation for Segment>
-...
-
-Rules:
-1.  **Strict Format**: Output exactly one line per segment using the format: "{id} | {translated_text}".
-2.  **ID Mapping**: You MUST copy the exact "id" from the input segment to the output line.
-3.  **Newline Handling**: If the translated text contains a newline, replace it with the HTML tag "<br>" to ensure it stays on a single line.
-4.  **Separator**: Use the pipe symbol " | " strictly to separate the ID and the text.
-5.  **Context**: Use title/description for context only; do not output them.
-6.  **HTML/Tags**: Preserve whitespace, HTML entities, and all HTML-like tags (e.g., <i1>, <b>). Translate inner text only.
-7.  **Glossary**: Highest priority. Follow 'glossary'. Use value for translation; if value is "", keep the key.
-8.  **Do Not Translate**: content in <code>, <pre>, text enclosed in backticks, or placeholders like {1}, {{1}}, [1].
-9.  **Tone**: Apply the specified tone.
-
-Example:
-Input: {"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello."},{"id":1,"text":"Line 1\nLine 2"}],"glossary":{}}
-Output:
-0 | 你好。
-1 | 第一行<br>第二行
-
-Fail-safe: On error, return "{id} | {original_text}" line by line.`;
-
-export const defaultSystemPromptPercent = `Act as a translation API. Output translated segments separated by a line containing only %%.
-
-Input:
-Target Language: <lang>
-Title: <context>
-Description: <context>
-Summary: <context>
-Tone: <formal|casual>
-
-Glossary:
-- <sourceTerm>: <targetTerm>
-
-Segments:
-[0]
-<source text 0>
-%%
-[1]
-<source text 1>
-%%
-...
-
-Output Format:
-<translation for segment 0>
-%%
-<translation for segment 1>
-%%
-...
-
-Rules:
-1. Output translations in the exact same order as input segments.
-2. Use a single line containing only %% as the separator between segments.
-3. Do not output ids, labels, markdown, code fences, or any explanation.
-4. Preserve HTML tags, entities, placeholders, and protected content; translate only natural language text.
-5. Use title/description/summary only as context; do not output them.
-6. Follow glossary entries strictly. If a glossary value is empty, keep the source term.
-7. Apply the requested tone.
-8. The input order defines the output order. Ignore input ids except for keeping segment order.
-
-Example:
-Input:
-Target Language: zh-CN
-Title: 
-Description: 
-Summary: 
-Tone: neutral
-
-Glossary:
-(none)
-
-Segments:
-[0]
-Hello.
-%%
-[1]
-World!
-Output:
-你好。
-%%
-世界！
-
-Fail-safe: If translation fails, still output one segment per input in the same order, separated by %%.`;
+export const defaultSystemPromptPercent = defaultLlmRulesPrompt;
 
 export const defaultLlmInputTemplateJson = `{"targetLanguage":{{to_lang|json}},"title":{{title|json}},"description":{{description|json}},"summary":{{summary|json}},"segments":[{{segments}}],"glossary":{{glossary|json}},"tone":{{tone|json}}}`;
 
@@ -621,28 +497,53 @@ export const getLlmTemplatePreset = (llmOutputFormat) => {
   }
 };
 
-export const resolveLlmOutputFormat = ({
+export const detectLlmTemplatePreset = ({
   llmOutputFormat,
-  systemPrompt = "",
+  llmInputTemplate,
+  llmInputSegmentTemplate,
+  llmInputSegmentsSeparator,
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
 } = {}) => {
-  if (LLM_OUTPUT_FORMAT_ALL.includes(llmOutputFormat)) {
+  const formats = [
+    LLM_OUTPUT_FORMAT_JSON,
+    LLM_OUTPUT_FORMAT_XML,
+    LLM_OUTPUT_FORMAT_TEXTLINES,
+    LLM_OUTPUT_FORMAT_PERCENT,
+  ];
+
+  if (
+    !llmInputTemplate &&
+    !llmInputSegmentTemplate &&
+    !llmOutputTemplate &&
+    !llmOutputSegmentTemplate &&
+    formats.includes(llmOutputFormat)
+  ) {
     return llmOutputFormat;
   }
 
-  if (systemPrompt === defaultSystemPrompt) {
-    return LLM_OUTPUT_FORMAT_JSON;
-  }
+  const matched = formats.find((format) => {
+    const preset = getLlmTemplatePreset(format);
+    return (
+      preset &&
+      preset.llmInputTemplate === llmInputTemplate &&
+      preset.llmInputSegmentTemplate === llmInputSegmentTemplate &&
+      preset.llmInputSegmentsSeparator === llmInputSegmentsSeparator &&
+      preset.llmOutputTemplate === llmOutputTemplate &&
+      preset.llmOutputSegmentTemplate === llmOutputSegmentTemplate &&
+      preset.llmOutputSegmentsSeparator === llmOutputSegmentsSeparator &&
+      preset.llmOutputMappingMode === llmOutputMappingMode
+    );
+  });
 
-  if (systemPrompt === defaultSystemPromptXml) {
-    return LLM_OUTPUT_FORMAT_XML;
-  }
+  return matched || LLM_TEMPLATE_PRESET_CUSTOM;
+};
 
-  if (systemPrompt === defaultSystemPromptLines) {
-    return LLM_OUTPUT_FORMAT_TEXTLINES;
-  }
-
-  if (systemPrompt === defaultSystemPromptPercent) {
-    return LLM_OUTPUT_FORMAT_PERCENT;
+export const resolveLlmOutputFormat = ({ llmOutputFormat } = {}) => {
+  if (LLM_OUTPUT_FORMAT_ALL.includes(llmOutputFormat)) {
+    return llmOutputFormat;
   }
 
   return LLM_OUTPUT_FORMAT_AUTO;
@@ -716,7 +617,7 @@ const defaultApi = {
   url: "",
   key: "",
   model: "", // 模型名称
-  systemPrompt: defaultSystemPromptXml,
+  systemPrompt: defaultLlmRulesPrompt,
   llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
   llmInputTemplate: defaultLlmInputTemplateJson,
   llmInputSegmentTemplate: defaultLlmInputSegmentTemplateJson,
@@ -839,7 +740,6 @@ const defaultApiOpts = {
     ...defaultApi,
     url: "http://localhost:11434/v1/chat/completions",
     model: "llama3.1",
-    systemPrompt: defaultSystemPromptPercent,
     llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
     ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
     useBatchFetch: true,

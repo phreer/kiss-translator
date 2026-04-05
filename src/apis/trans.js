@@ -30,6 +30,7 @@ import {
   defaultSubtitlePrompt,
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
+  defaultLlmRulesPrompt,
   INPUT_PLACE_TONE,
   INPUT_PLACE_TITLE,
   INPUT_PLACE_DESCRIPTION,
@@ -55,6 +56,7 @@ import {
   LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_MAPPING_BY_ID,
   LLM_OUTPUT_MAPPING_BY_ORDER,
+  detectLlmTemplatePreset,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   getLlmTemplatePreset,
@@ -193,6 +195,31 @@ const renderSegmentsTemplate = ({
     )
     .join(separator);
 
+const SAMPLE_PROMPT_CONTEXT = {
+  to_lang: "zh-CN",
+  title: "Landing Page",
+  description: "Marketing copy for a developer tool.",
+  summary: "A concise product overview for developers.",
+  tone: "neutral",
+  glossary: { World: "世界" },
+  glossary_lines: "- World: 世界",
+};
+
+const SAMPLE_PROMPT_SEGMENTS = ["Hello, world!", "Line 1\nLine 2"];
+
+const SAMPLE_PROMPT_OUTPUT_SEGMENTS = [
+  {
+    id: 0,
+    translation: "你好，世界！",
+    source_language: "en",
+  },
+  {
+    id: 1,
+    translation: "第一行\n第二行",
+    source_language: "en",
+  },
+];
+
 const normalizeLlmTemplates = ({
   llmOutputFormat,
   llmInputTemplate,
@@ -270,6 +297,183 @@ const hasCustomOutputTemplate = (templateMeta) =>
       templateMeta.llmOutputTemplate &&
       templateMeta.llmOutputSegmentTemplate
   );
+
+const renderTemplateSampleInput = (templateMeta) => {
+  const segments = renderSegmentsTemplate({
+    segments: SAMPLE_PROMPT_SEGMENTS,
+    segmentTemplate: templateMeta.llmInputSegmentTemplate,
+    separator: templateMeta.llmInputSegmentsSeparator,
+    valueBuilder: (text, index) => ({
+      id: index,
+      source_text: text,
+    }),
+  });
+
+  return renderTemplate(templateMeta.llmInputTemplate, {
+    ...SAMPLE_PROMPT_CONTEXT,
+    segments,
+  });
+};
+
+const renderTemplateSampleOutput = (templateMeta) => {
+  const segments = renderSegmentsTemplate({
+    segments: SAMPLE_PROMPT_OUTPUT_SEGMENTS,
+    segmentTemplate: templateMeta.llmOutputSegmentTemplate,
+    separator: templateMeta.llmOutputSegmentsSeparator,
+    valueBuilder: (segment) => segment,
+  });
+
+  return renderTemplate(templateMeta.llmOutputTemplate, {
+    ...SAMPLE_PROMPT_CONTEXT,
+    segments,
+  });
+};
+
+const buildProtocolAppendix = (templateMeta) => {
+  const mappingMode =
+    templateMeta.llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ORDER
+      ? "by output order"
+      : "by segment id";
+
+  return [
+    "Protocol Appendix:",
+    `- Output mapping: ${mappingMode}`,
+    `- Input segment separator: ${JSON.stringify(
+      templateMeta.llmInputSegmentsSeparator
+    )}`,
+    `- Output segment separator: ${JSON.stringify(
+      templateMeta.llmOutputSegmentsSeparator
+    )}`,
+    "",
+    "Sample Input:",
+    renderTemplateSampleInput(templateMeta),
+    "",
+    "Expected Output:",
+    renderTemplateSampleOutput(templateMeta),
+  ].join("\n");
+};
+
+export const buildBatchSystemPrompt = ({
+  systemPrompt,
+  tone,
+  from,
+  to,
+  fromLang,
+  toLang,
+  texts,
+  docInfo,
+  templateMeta,
+}) => {
+  const rulesPrompt = genSystemPrompt({
+    systemPrompt: systemPrompt || defaultLlmRulesPrompt,
+    tone,
+    from,
+    to,
+    fromLang,
+    toLang,
+    texts,
+    docInfo,
+  }).trim();
+
+  return `${rulesPrompt}\n\n${buildProtocolAppendix(templateMeta)}`.trim();
+};
+
+export const getLlmPromptPreview = ({
+  systemPrompt,
+  llmOutputFormat,
+  llmInputTemplate,
+  llmInputSegmentTemplate,
+  llmInputSegmentsSeparator,
+  llmOutputTemplate,
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
+}) => {
+  const templateMeta = buildTemplateMeta({
+    systemPrompt,
+    llmOutputFormat,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
+  });
+
+  return {
+    templateMeta,
+    preset: detectLlmTemplatePreset({
+      llmOutputFormat,
+      llmInputTemplate: templateMeta.llmInputTemplate,
+      llmInputSegmentTemplate: templateMeta.llmInputSegmentTemplate,
+      llmInputSegmentsSeparator: templateMeta.llmInputSegmentsSeparator,
+      llmOutputTemplate: templateMeta.llmOutputTemplate,
+      llmOutputSegmentTemplate: templateMeta.llmOutputSegmentTemplate,
+      llmOutputSegmentsSeparator: templateMeta.llmOutputSegmentsSeparator,
+      llmOutputMappingMode: templateMeta.llmOutputMappingMode,
+    }),
+    rulesPrompt: genSystemPrompt({
+      systemPrompt: systemPrompt || defaultLlmRulesPrompt,
+      tone: SAMPLE_PROMPT_CONTEXT.tone,
+      from: "en",
+      to: "zh-CN",
+      fromLang: "en",
+      toLang: SAMPLE_PROMPT_CONTEXT.to_lang,
+      texts: SAMPLE_PROMPT_SEGMENTS,
+      docInfo: {
+        title: SAMPLE_PROMPT_CONTEXT.title,
+        description: SAMPLE_PROMPT_CONTEXT.description,
+        summary: SAMPLE_PROMPT_CONTEXT.summary,
+      },
+    }).trim(),
+    protocolAppendix: buildProtocolAppendix(templateMeta),
+    sampleUserInput: renderTemplateSampleInput(templateMeta),
+    sampleOutput: renderTemplateSampleOutput(templateMeta),
+  };
+};
+
+export const validateTemplateSettings = ({
+  llmOutputSegmentTemplate,
+  llmOutputSegmentsSeparator,
+  llmOutputMappingMode,
+  llmInputTemplate,
+  llmOutputTemplate,
+} = {}) => {
+  const warnings = [];
+
+  if (!llmInputTemplate?.includes(TEMPLATE_SEGMENTS_PLACEHOLDER)) {
+    warnings.push("Input template should include {{segments}}.");
+  }
+
+  if (!llmOutputTemplate?.includes(TEMPLATE_SEGMENTS_PLACEHOLDER)) {
+    warnings.push("Output template should include {{segments}}.");
+  }
+
+  if (!llmOutputSegmentTemplate?.includes("{{translation")) {
+    warnings.push("Output segment template should include {{translation}}.");
+  }
+
+  if (
+    llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ID &&
+    !llmOutputSegmentTemplate?.includes("{{id")
+  ) {
+    warnings.push(
+      "by_id mapping requires {{id}} in the output segment template."
+    );
+  }
+
+  if (
+    llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ORDER &&
+    !llmOutputSegmentsSeparator
+  ) {
+    warnings.push(
+      "by_order mapping should define an output segment separator."
+    );
+  }
+
+  return warnings;
+};
 
 // 轮询key/url
 const keyPick = (apiSlug, key = "", cacheMap) => {
@@ -677,9 +881,6 @@ const parseSTRes = (raw) => {
 
   return [];
 };
-
-const getLlmOutputFormat = ({ llmOutputFormat, systemPrompt }) =>
-  resolveLlmOutputFormat({ llmOutputFormat, systemPrompt });
 
 const genGoogle = ({ texts, from, to, url, key }) => {
   const params = queryString.stringify({
@@ -1223,16 +1424,38 @@ export const genTransReq = async ({ reqHook, ...args }) => {
           tone,
           aiTerms,
         })
-      : genSystemPrompt({
-          systemPrompt: useBatchFetch ? systemPrompt : nobatchPrompt,
-          from,
-          to,
-          fromLang,
-          toLang,
-          texts,
-          docInfo,
-          tone,
-        });
+      : useBatchFetch
+        ? buildBatchSystemPrompt({
+            systemPrompt,
+            from,
+            to,
+            fromLang,
+            toLang,
+            texts,
+            docInfo,
+            tone,
+            templateMeta: buildTemplateMeta({
+              llmOutputFormat,
+              llmInputTemplate,
+              llmInputSegmentTemplate,
+              llmInputSegmentsSeparator,
+              llmOutputTemplate,
+              llmOutputSegmentTemplate,
+              llmOutputSegmentsSeparator,
+              llmOutputMappingMode,
+              systemPrompt,
+            }),
+          })
+        : genSystemPrompt({
+            systemPrompt: nobatchPrompt,
+            from,
+            to,
+            fromLang,
+            toLang,
+            texts,
+            docInfo,
+            tone,
+          });
     args.userPrompt = events
       ? JSON.stringify(events)
       : genUserPrompt({

@@ -23,6 +23,10 @@ import { useAlert } from "../../hooks/Alert";
 import { useApiList, useApiItem } from "../../hooks/Api";
 import { useConfirm } from "../../hooks/Confirm";
 import { apiTranslate } from "../../apis";
+import {
+  getLlmPromptPreview,
+  validateTemplateSettings,
+} from "../../apis/trans";
 import Box from "@mui/material/Box";
 import ReusableAutocomplete from "./ReusableAutocomplete";
 import ShowMoreButton from "./ShowMoreButton";
@@ -47,11 +51,8 @@ import {
   OPT_TRANS_AZUREAI,
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
-  defaultSystemPrompt,
-  defaultSystemPromptPercent,
-  defaultSystemPromptXml,
-  defaultSystemPromptLines,
   LLM_OUTPUT_FORMAT_AUTO,
+  LLM_TEMPLATE_PRESET_CUSTOM,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_MAPPING_BY_ID,
   LLM_OUTPUT_MAPPING_BY_ORDER,
@@ -130,12 +131,6 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
   const llmOutputFormatOptions = useMemo(
     () => [
       {
-        value: LLM_OUTPUT_FORMAT_AUTO,
-        label: i18n("llm_output_format_auto"),
-        preview:
-          'Auto detection tries JSON first, then XML, then text lines. Example: {"translations":[{"id":0,"text":"你好"}]}',
-      },
-      {
         value: LLM_OUTPUT_FORMAT_JSON,
         label: i18n("llm_output_format_json"),
         preview:
@@ -156,6 +151,11 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
         value: LLM_OUTPUT_FORMAT_PERCENT,
         label: i18n("llm_output_format_percent"),
         preview: "你好\n%%\n世界",
+      },
+      {
+        value: LLM_TEMPLATE_PRESET_CUSTOM,
+        label: i18n("custom_option") || "Custom",
+        preview: i18n("llm_output_format_helper"),
       },
     ],
     [i18n]
@@ -201,6 +201,19 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
         [name]: value,
       };
 
+      if (
+        name === "llmTemplatePreset" &&
+        value !== LLM_TEMPLATE_PRESET_CUSTOM
+      ) {
+        const preset = getLlmTemplatePreset(value);
+        if (preset) {
+          Object.assign(newData, {
+            llmOutputFormat: value,
+            ...preset,
+          });
+        }
+      }
+
       // 关闭聚合翻译时，自动关闭流式传输
       if (name === "useBatchFetch" && value === false) {
         newData.useStream = false;
@@ -208,33 +221,6 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
 
       return newData;
     });
-  };
-
-  const handleUpdateSystemPrompt = (e) => {
-    const promptMap = {
-      json: defaultSystemPrompt,
-      xml: defaultSystemPromptXml,
-      textlines: defaultSystemPromptLines,
-      percent: defaultSystemPromptPercent,
-    };
-    const formatMap = {
-      json: LLM_OUTPUT_FORMAT_JSON,
-      xml: LLM_OUTPUT_FORMAT_XML,
-      textlines: LLM_OUTPUT_FORMAT_TEXTLINES,
-      percent: LLM_OUTPUT_FORMAT_PERCENT,
-    };
-    const systemPrompt =
-      promptMap[e.target.dataset.output] || defaultSystemPromptXml;
-    const preset =
-      getLlmTemplatePreset(formatMap[e.target.dataset.output]) ||
-      getLlmTemplatePreset(LLM_OUTPUT_FORMAT_XML);
-    setFormData((prevData) => ({
-      ...prevData,
-      systemPrompt,
-      llmOutputFormat:
-        formatMap[e.target.dataset.output] || LLM_OUTPUT_FORMAT_XML,
-      ...preset,
-    }));
   };
 
   const handleSave = () => {
@@ -274,6 +260,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     model = "",
     apiType,
     systemPrompt = "",
+    llmTemplatePreset = LLM_OUTPUT_FORMAT_XML,
     llmOutputFormat = LLM_OUTPUT_FORMAT_AUTO,
     llmInputTemplate = "",
     llmInputSegmentTemplate = "",
@@ -315,9 +302,57 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     aiTerms = "",
   } = formData;
 
+  const promptPreview = useMemo(
+    () =>
+      getLlmPromptPreview({
+        systemPrompt,
+        llmOutputFormat,
+        llmInputTemplate,
+        llmInputSegmentTemplate,
+        llmInputSegmentsSeparator,
+        llmOutputTemplate,
+        llmOutputSegmentTemplate,
+        llmOutputSegmentsSeparator,
+        llmOutputMappingMode,
+      }),
+    [
+      systemPrompt,
+      llmOutputFormat,
+      llmInputTemplate,
+      llmInputSegmentTemplate,
+      llmInputSegmentsSeparator,
+      llmOutputTemplate,
+      llmOutputSegmentTemplate,
+      llmOutputSegmentsSeparator,
+      llmOutputMappingMode,
+    ]
+  );
+
+  const currentTemplatePreset =
+    promptPreview.preset || llmTemplatePreset || LLM_TEMPLATE_PRESET_CUSTOM;
+
   const selectedOutputFormat =
-    llmOutputFormatOptions.find((item) => item.value === llmOutputFormat) ||
-    llmOutputFormatOptions[0];
+    llmOutputFormatOptions.find(
+      (item) => item.value === currentTemplatePreset
+    ) || llmOutputFormatOptions[0];
+
+  const templateWarnings = useMemo(
+    () =>
+      validateTemplateSettings({
+        llmInputTemplate,
+        llmOutputTemplate,
+        llmOutputSegmentTemplate,
+        llmOutputSegmentsSeparator,
+        llmOutputMappingMode,
+      }),
+    [
+      llmInputTemplate,
+      llmOutputTemplate,
+      llmOutputSegmentTemplate,
+      llmOutputSegmentsSeparator,
+      llmOutputMappingMode,
+    ]
+  );
 
   const keyHelper = useMemo(
     () => (API_SPE_TYPES.mulkeys.has(apiType) ? i18n("mulkeys_help") : ""),
@@ -477,8 +512,8 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                 select
                 size="small"
                 label={i18n("llm_output_format")}
-                name="llmOutputFormat"
-                value={llmOutputFormat}
+                name="llmTemplatePreset"
+                value={llmTemplatePreset}
                 onChange={handleChange}
                 helperText={i18n("llm_output_format_helper")}
               >
@@ -501,52 +536,49 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
               </Alert>
               <TextField
                 size="small"
-                label={"Batch System Prompt"}
+                label={"Translation Rules"}
                 name="systemPrompt"
                 value={systemPrompt}
                 onChange={handleChange}
                 multiline
                 maxRows={10}
-                helperText={
-                  <>
-                    {i18n("system_prompt_helper_1")}
-                    <Link
-                      component="button"
-                      sx={{ margin: "0 1em" }}
-                      data-output="json"
-                      onClick={handleUpdateSystemPrompt}
-                    >
-                      {i18n("json_output")}
-                    </Link>
-                    <Link
-                      component="button"
-                      sx={{ margin: "0 1em" }}
-                      data-output="xml"
-                      onClick={handleUpdateSystemPrompt}
-                    >
-                      {i18n("xml_output")}
-                    </Link>
-                    <Link
-                      component="button"
-                      sx={{ margin: "0 1em" }}
-                      data-output="textlines"
-                      onClick={handleUpdateSystemPrompt}
-                    >
-                      {i18n("textlines_output")}
-                    </Link>
-                    <Link
-                      component="button"
-                      sx={{ margin: "0 1em" }}
-                      data-output="percent"
-                      onClick={handleUpdateSystemPrompt}
-                    >
-                      {i18n("percent_output")}
-                    </Link>
-                    <br />
-                    {i18n("system_prompt_helper_2")}
-                  </>
-                }
+                helperText={i18n("system_prompt_helper_2")}
               />
+              <Alert severity="success">
+                <Box component="div" sx={{ fontWeight: 600, marginBottom: 1 }}>
+                  Final Prompt Preview
+                </Box>
+                <Box component="div" sx={{ marginBottom: 1, fontWeight: 600 }}>
+                  Rules Prompt
+                </Box>
+                <Box component="pre" sx={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                  {promptPreview.rulesPrompt}
+                </Box>
+                <Box
+                  component="div"
+                  sx={{ marginTop: 2, marginBottom: 1, fontWeight: 600 }}
+                >
+                  Protocol Appendix
+                </Box>
+                <Box component="pre" sx={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                  {promptPreview.protocolAppendix}
+                </Box>
+              </Alert>
+              {templateWarnings.length > 0 && (
+                <Alert severity="warning">
+                  <Box
+                    component="div"
+                    sx={{ fontWeight: 600, marginBottom: 1 }}
+                  >
+                    Template Warnings
+                  </Box>
+                  <Box component="ul" sx={{ margin: 0, paddingLeft: "1.2rem" }}>
+                    {templateWarnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </Box>
+                </Alert>
+              )}
               {showMore && (
                 <>
                   <TextField
@@ -617,6 +649,32 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                       </MenuItem>
                     ))}
                   </TextField>
+                  <Alert severity="info">
+                    <Box
+                      component="div"
+                      sx={{ fontWeight: 600, marginBottom: 1 }}
+                    >
+                      Sample User Input
+                    </Box>
+                    <Box
+                      component="pre"
+                      sx={{ margin: 0, whiteSpace: "pre-wrap" }}
+                    >
+                      {promptPreview.sampleUserInput}
+                    </Box>
+                    <Box
+                      component="div"
+                      sx={{ marginTop: 2, marginBottom: 1, fontWeight: 600 }}
+                    >
+                      Expected Output
+                    </Box>
+                    <Box
+                      component="pre"
+                      sx={{ margin: 0, whiteSpace: "pre-wrap" }}
+                    >
+                      {promptPreview.sampleOutput}
+                    </Box>
+                  </Alert>
                 </>
               )}
             </>

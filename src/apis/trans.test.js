@@ -32,14 +32,19 @@ jest.mock("./history", () => ({ getMsgHistory: jest.fn() }));
 jest.mock("../subtitle/vtt", () => ({ parseBilingualVtt: jest.fn() }));
 jest.mock("../libs/docInfo", () => ({ getDocInfo: jest.fn(() => ({})) }));
 
-import { genUserPrompt, parseAIRes } from "./trans";
 import {
-  defaultSystemPrompt,
+  buildBatchSystemPrompt,
+  genUserPrompt,
+  getLlmPromptPreview,
+  parseAIRes,
+  validateTemplateSettings,
+} from "./trans";
+import {
+  defaultLlmRulesPrompt,
   defaultLlmInputTemplatePercent,
   defaultLlmInputSegmentTemplatePercent,
-  defaultSystemPromptLines,
-  defaultSystemPromptPercent,
-  defaultSystemPromptXml,
+  defaultLlmOutputTemplatePercent,
+  defaultLlmOutputSegmentTemplatePercent,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_MAPPING_BY_ORDER,
@@ -47,6 +52,7 @@ import {
   LLM_OUTPUT_FORMAT_TEXTLINES,
   LLM_OUTPUT_FORMAT_XML,
   resolveLlmOutputFormat,
+  getLlmTemplatePreset,
 } from "../config";
 
 describe("resolveLlmOutputFormat", () => {
@@ -54,34 +60,58 @@ describe("resolveLlmOutputFormat", () => {
     expect(
       resolveLlmOutputFormat({
         llmOutputFormat: LLM_OUTPUT_FORMAT_JSON,
-        systemPrompt: defaultSystemPromptXml,
+        systemPrompt: defaultLlmRulesPrompt,
       })
     ).toBe(LLM_OUTPUT_FORMAT_JSON);
   });
 
-  it("falls back to known default prompts", () => {
-    expect(resolveLlmOutputFormat({ systemPrompt: defaultSystemPrompt })).toBe(
-      LLM_OUTPUT_FORMAT_JSON
-    );
+  it("uses auto when no explicit format is provided", () => {
     expect(
-      resolveLlmOutputFormat({ systemPrompt: defaultSystemPromptXml })
-    ).toBe(LLM_OUTPUT_FORMAT_XML);
-    expect(
-      resolveLlmOutputFormat({ systemPrompt: defaultSystemPromptLines })
-    ).toBe(LLM_OUTPUT_FORMAT_TEXTLINES);
-    expect(
-      resolveLlmOutputFormat({ systemPrompt: defaultSystemPromptPercent })
-    ).toBe(LLM_OUTPUT_FORMAT_PERCENT);
-  });
-
-  it("uses auto for custom prompts without explicit format", () => {
-    expect(resolveLlmOutputFormat({ systemPrompt: "custom" })).toBe(
-      LLM_OUTPUT_FORMAT_AUTO
-    );
+      resolveLlmOutputFormat({ systemPrompt: defaultLlmRulesPrompt })
+    ).toBe(LLM_OUTPUT_FORMAT_AUTO);
   });
 });
 
 describe("parseAIRes", () => {
+  it("builds final batch system prompt with protocol appendix", () => {
+    const prompt = buildBatchSystemPrompt({
+      systemPrompt: defaultLlmRulesPrompt,
+      tone: "neutral",
+      from: "en",
+      to: "zh-CN",
+      fromLang: "en",
+      toLang: "zh-CN",
+      texts: ["Hello"],
+      docInfo: {},
+      templateMeta: {
+        llmInputTemplate: defaultLlmInputTemplatePercent,
+        llmInputSegmentTemplate: defaultLlmInputSegmentTemplatePercent,
+        llmInputSegmentsSeparator: "\n%%\n",
+        llmOutputTemplate: defaultLlmOutputTemplatePercent,
+        llmOutputSegmentTemplate: defaultLlmOutputSegmentTemplatePercent,
+        llmOutputSegmentsSeparator: "\n%%\n",
+        llmOutputMappingMode: LLM_OUTPUT_MAPPING_BY_ORDER,
+      },
+    });
+
+    expect(prompt).toContain("Act as a precise translation engine.");
+    expect(prompt).toContain("Protocol Appendix:");
+    expect(prompt).toContain("Sample Input:");
+    expect(prompt).toContain("Expected Output:");
+  });
+
+  it("returns prompt preview for preset templates", () => {
+    const preview = getLlmPromptPreview({
+      systemPrompt: defaultLlmRulesPrompt,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
+      ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
+    });
+
+    expect(preview.preset).toBe(LLM_OUTPUT_FORMAT_PERCENT);
+    expect(preview.sampleUserInput).toContain("Target Language: zh-CN");
+    expect(preview.sampleOutput).toContain("你好，世界");
+  });
+
   it("renders percent input template for batch prompts", () => {
     const prompt = genUserPrompt({
       useBatchFetch: true,
@@ -89,7 +119,7 @@ describe("parseAIRes", () => {
       llmInputTemplate: defaultLlmInputTemplatePercent,
       llmInputSegmentTemplate: defaultLlmInputSegmentTemplatePercent,
       llmInputSegmentsSeparator: "\n%%\n",
-      systemPrompt: defaultSystemPromptPercent,
+      systemPrompt: defaultLlmRulesPrompt,
       toLang: "zh-CN",
       texts: ["Hello.", "World!"],
       glossary: { World: "世界" },
@@ -147,6 +177,20 @@ describe("parseAIRes", () => {
       ["你好", ""],
       ["世界", ""],
     ]);
+  });
+
+  it("warns when by_id template misses id placeholder", () => {
+    expect(
+      validateTemplateSettings({
+        llmInputTemplate: "{{segments}}",
+        llmOutputTemplate: "{{segments}}",
+        llmOutputSegmentTemplate: "<seg>{{translation}}</seg>",
+        llmOutputSegmentsSeparator: "\n",
+        llmOutputMappingMode: "by_id",
+      })
+    ).toContain(
+      "by_id mapping requires {{id}} in the output segment template."
+    );
   });
 
   it("keeps auto detection for legacy prompts", () => {
