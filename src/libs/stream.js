@@ -2,6 +2,7 @@ import { JSONParser } from "@streamparser/json";
 import {
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   OPT_TRANS_OPENAI,
@@ -117,6 +118,14 @@ export function getStreamDelta(json, apiType) {
 export function* parseStreamingSegments(content, processedIds) {
   if (!content) return;
 
+  let hasPercent = false;
+  for (const segment of parseStreamingPercentSegments(content, processedIds)) {
+    hasPercent = true;
+    yield segment;
+  }
+
+  if (hasPercent) return;
+
   let hasXml = false;
   for (const segment of parseStreamingXmlSegments(content, processedIds)) {
     hasXml = true;
@@ -170,6 +179,20 @@ export function* parseStreamingTextLineSegments(content, processedIds) {
         yield { id, translation };
       }
     }
+  }
+}
+
+export function* parseStreamingPercentSegments(content, processedIds) {
+  if (!content || !content.includes("%%")) return;
+
+  const parts = content.split(/\n\s*%%\s*\n/);
+  const completeCount = parts.length - 1;
+
+  for (let i = 0; i < completeCount; i++) {
+    if (processedIds.has(i)) continue;
+
+    processedIds.add(i);
+    yield { id: i, translation: [parts[i].trim(), ""] };
   }
 }
 
@@ -236,9 +259,15 @@ export function detectStreamFormat(content) {
   const jsonStart = stripped.search(/[{[]/);
   const xmlStart = stripped.search(/<(t|item|seg)\s/i);
   const lineStart = stripped.search(/^\d+\s*\|/m);
+  const percentStart = stripped.search(/^\s*%%\s*$/m);
 
   // 如果都没找到，无法确定格式
-  if (jsonStart === -1 && xmlStart === -1 && lineStart === -1) {
+  if (
+    jsonStart === -1 &&
+    xmlStart === -1 &&
+    lineStart === -1 &&
+    percentStart === -1
+  ) {
     return { isJson: false, detected: false };
   }
 
@@ -247,6 +276,7 @@ export function detectStreamFormat(content) {
     { type: "json", pos: jsonStart },
     { type: "xml", pos: xmlStart },
     { type: "line", pos: lineStart },
+    { type: "percent", pos: percentStart },
   ].filter((p) => p.pos !== -1);
 
   if (positions.length === 0) {
@@ -264,7 +294,8 @@ export function detectStreamJsonFormat(llmOutputFormat, content) {
 
   if (
     llmOutputFormat === LLM_OUTPUT_FORMAT_XML ||
-    llmOutputFormat === LLM_OUTPUT_FORMAT_TEXTLINES
+    llmOutputFormat === LLM_OUTPUT_FORMAT_TEXTLINES ||
+    llmOutputFormat === LLM_OUTPUT_FORMAT_PERCENT
   ) {
     return { isJson: false, detected: true };
   }

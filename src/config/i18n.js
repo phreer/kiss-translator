@@ -2276,6 +2276,13 @@ export const I18N = {
     ja: `クリックして「複数行テキスト形式」に切り替え`,
     ko: `클릭하여 "여러 줄 텍스트 형식"으로 전환`,
   },
+  percent_output: {
+    zh: `点击切换 “%% 分隔格式“`,
+    en: `Click to switch to "%% Delimited Format"`,
+    zh_TW: `點擊切換「%% 分隔格式」`,
+    ja: `クリックして「%% 区切り形式」に切り替え`,
+    ko: `클릭하여 "%% 구분 형식"으로 전환`,
+  },
   llm_output_format: {
     zh: `LLM 输出格式`,
     en: `LLM Output Format`,
@@ -2317,6 +2324,13 @@ export const I18N = {
     zh_TW: `多行文字`,
     ja: `複数行テキスト`,
     ko: `여러 줄 텍스트`,
+  },
+  llm_output_format_percent: {
+    zh: `%% 分隔`,
+    en: `%% Delimited`,
+    zh_TW: `%% 分隔`,
+    ja: `%% 区切り`,
+    ko: `%% 구분`,
   },
   llm_output_preview: {
     zh: `期望输出示例`,

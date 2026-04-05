@@ -41,6 +41,7 @@ import {
   INPUT_PLACE_SUMMARY,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   resolveLlmOutputFormat,
@@ -246,6 +247,9 @@ const parseAIResByTextLines = (content) =>
     return [text, ""];
   });
 
+const parseAIResByPercent = (content) =>
+  content.split(/\n?\s*%%\s*\n?/).map((segment) => [segment.trim(), ""]);
+
 export const parseAIRes = (raw, useBatchFetch = true, llmOutputFormat) => {
   if (!raw) {
     return [];
@@ -281,12 +285,15 @@ export const parseAIRes = (raw, useBatchFetch = true, llmOutputFormat) => {
       return parseAIResByXml(content) || [];
     case LLM_OUTPUT_FORMAT_TEXTLINES:
       return parseAIResByTextLines(content);
+    case LLM_OUTPUT_FORMAT_PERCENT:
+      return parseAIResByPercent(content);
     case LLM_OUTPUT_FORMAT_AUTO:
     case undefined:
     case null:
       return (
         parseAIResByJson(content) ||
         parseAIResByXml(content) ||
+        (content.includes("%%") ? parseAIResByPercent(content) : null) ||
         parseAIResByTextLines(content)
       );
     default:
@@ -1242,6 +1249,8 @@ async function* handleTranslateStreamInternal(
         return parseStreamingXmlSegments(fullContent, processedIds);
       case LLM_OUTPUT_FORMAT_TEXTLINES:
         return parseStreamingTextLineSegments(fullContent, processedIds);
+      case LLM_OUTPUT_FORMAT_PERCENT:
+        return parseStreamingSegments(fullContent, processedIds);
       case LLM_OUTPUT_FORMAT_AUTO:
       default:
         return parseStreamingSegments(fullContent, processedIds);

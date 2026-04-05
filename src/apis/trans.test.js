@@ -36,9 +36,11 @@ import { parseAIRes } from "./trans";
 import {
   defaultSystemPrompt,
   defaultSystemPromptLines,
+  defaultSystemPromptPercent,
   defaultSystemPromptXml,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   LLM_OUTPUT_FORMAT_XML,
   resolveLlmOutputFormat,
@@ -64,6 +66,9 @@ describe("resolveLlmOutputFormat", () => {
     expect(
       resolveLlmOutputFormat({ systemPrompt: defaultSystemPromptLines })
     ).toBe(LLM_OUTPUT_FORMAT_TEXTLINES);
+    expect(
+      resolveLlmOutputFormat({ systemPrompt: defaultSystemPromptPercent })
+    ).toBe(LLM_OUTPUT_FORMAT_PERCENT);
   });
 
   it("uses auto for custom prompts without explicit format", () => {
@@ -92,6 +97,14 @@ describe("parseAIRes", () => {
   it("parses line output explicitly", () => {
     const raw = "0 | 你好\n1 | 世界";
     expect(parseAIRes(raw, true, LLM_OUTPUT_FORMAT_TEXTLINES)).toEqual([
+      ["你好", ""],
+      ["世界", ""],
+    ]);
+  });
+
+  it("parses percent output explicitly", () => {
+    const raw = "你好\n%%\n世界";
+    expect(parseAIRes(raw, true, LLM_OUTPUT_FORMAT_PERCENT)).toEqual([
       ["你好", ""],
       ["世界", ""],
     ]);

@@ -48,10 +48,12 @@ import {
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
   defaultSystemPrompt,
+  defaultSystemPromptPercent,
   defaultSystemPromptXml,
   defaultSystemPromptLines,
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
 } from "../../config";
@@ -147,6 +149,11 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
         label: i18n("llm_output_format_textlines"),
         preview: "0 | 你好\n1 | 世界",
       },
+      {
+        value: LLM_OUTPUT_FORMAT_PERCENT,
+        label: i18n("llm_output_format_percent"),
+        preview: "你好\n%%\n世界",
+      },
     ],
     [i18n]
   );
@@ -191,11 +198,13 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
       json: defaultSystemPrompt,
       xml: defaultSystemPromptXml,
       textlines: defaultSystemPromptLines,
+      percent: defaultSystemPromptPercent,
     };
     const formatMap = {
       json: LLM_OUTPUT_FORMAT_JSON,
       xml: LLM_OUTPUT_FORMAT_XML,
       textlines: LLM_OUTPUT_FORMAT_TEXTLINES,
+      percent: LLM_OUTPUT_FORMAT_PERCENT,
     };
     const systemPrompt =
       promptMap[e.target.dataset.output] || defaultSystemPromptXml;
@@ -496,6 +505,14 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                       onClick={handleUpdateSystemPrompt}
                     >
                       {i18n("textlines_output")}
+                    </Link>
+                    <Link
+                      component="button"
+                      sx={{ margin: "0 1em" }}
+                      data-output="percent"
+                      onClick={handleUpdateSystemPrompt}
+                    >
+                      {i18n("percent_output")}
                     </Link>
                     <br />
                     {i18n("system_prompt_helper_2")}

@@ -24,11 +24,13 @@ export const LLM_OUTPUT_FORMAT_AUTO = "auto";
 export const LLM_OUTPUT_FORMAT_JSON = "json";
 export const LLM_OUTPUT_FORMAT_XML = "xml";
 export const LLM_OUTPUT_FORMAT_TEXTLINES = "textlines";
+export const LLM_OUTPUT_FORMAT_PERCENT = "percent";
 export const LLM_OUTPUT_FORMAT_ALL = [
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_FORMAT_XML,
   LLM_OUTPUT_FORMAT_TEXTLINES,
+  LLM_OUTPUT_FORMAT_PERCENT,
 ];
 
 // export const OPT_DICT_BAIDU = "Baidu";
@@ -475,6 +477,36 @@ Output:
 
 Fail-safe: On error, return "{id} | {original_text}" line by line.`;
 
+export const defaultSystemPromptPercent = `Act as a translation API. Output translated segments separated by a line containing only %%.
+
+Input:
+{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":0,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
+
+Output Format:
+<translation for segment 0>
+%%
+<translation for segment 1>
+%%
+...
+
+Rules:
+1. Output translations in the exact same order as input segments.
+2. Use a single line containing only %% as the separator between segments.
+3. Do not output ids, labels, markdown, code fences, or any explanation.
+4. Preserve HTML tags, entities, placeholders, and protected content; translate only natural language text.
+5. Use title/description/summary only as context; do not output them.
+6. Follow glossary entries strictly. If a glossary value is empty, keep the source term.
+7. Apply the requested tone.
+
+Example:
+Input: {"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello."},{"id":1,"text":"World!"}],"glossary":{}}
+Output:
+你好。
+%%
+世界！
+
+Fail-safe: If translation fails, still output one segment per input in the same order, separated by %%.`;
+
 export const resolveLlmOutputFormat = ({
   llmOutputFormat,
   systemPrompt = "",
@@ -493,6 +525,10 @@ export const resolveLlmOutputFormat = ({
 
   if (systemPrompt === defaultSystemPromptLines) {
     return LLM_OUTPUT_FORMAT_TEXTLINES;
+  }
+
+  if (systemPrompt === defaultSystemPromptPercent) {
+    return LLM_OUTPUT_FORMAT_PERCENT;
   }
 
   return LLM_OUTPUT_FORMAT_AUTO;
@@ -682,6 +718,8 @@ const defaultApiOpts = {
     ...defaultApi,
     url: "http://localhost:11434/v1/chat/completions",
     model: "llama3.1",
+    systemPrompt: defaultSystemPromptPercent,
+    llmOutputFormat: LLM_OUTPUT_FORMAT_PERCENT,
     useBatchFetch: true,
   },
   [OPT_TRANS_OPENROUTER]: {

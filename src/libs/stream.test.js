@@ -4,12 +4,14 @@ jest.mock("@streamparser/json", () => ({
 
 import {
   detectStreamJsonFormat,
+  parseStreamingSegments,
   parseStreamingTextLineSegments,
   parseStreamingXmlSegments,
 } from "./stream";
 import {
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_PERCENT,
   LLM_OUTPUT_FORMAT_TEXTLINES,
   LLM_OUTPUT_FORMAT_XML,
 } from "../config";
@@ -31,6 +33,12 @@ describe("detectStreamJsonFormat", () => {
     });
     expect(
       detectStreamJsonFormat(LLM_OUTPUT_FORMAT_TEXTLINES, "anything")
+    ).toEqual({
+      isJson: false,
+      detected: true,
+    });
+    expect(
+      detectStreamJsonFormat(LLM_OUTPUT_FORMAT_PERCENT, "anything")
     ).toEqual({
       isJson: false,
       detected: true,
@@ -70,5 +78,18 @@ describe("parseStreamingTextLineSegments", () => {
     ];
 
     expect(result).toEqual([{ id: 0, translation: ["你好", ""] }]);
+  });
+});
+
+describe("parseStreamingSegments with percent format", () => {
+  it("yields completed percent-delimited segments in order", () => {
+    const result = [
+      ...parseStreamingSegments("你好\n%%\n世界\n%%\n未完成", new Set()),
+    ];
+
+    expect(result).toEqual([
+      { id: 0, translation: ["你好", ""] },
+      { id: 1, translation: ["世界", ""] },
+    ]);
   });
 });
