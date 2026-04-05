@@ -20,6 +20,17 @@ export const INPUT_PLACE_KEY = "{{key}}"; // 占位符
 export const INPUT_PLACE_MODEL = "{{model}}"; // 占位符
 export const INPUT_PLACE_GLOSSARY = "{{glossary}}"; // 占位符
 
+export const LLM_OUTPUT_FORMAT_AUTO = "auto";
+export const LLM_OUTPUT_FORMAT_JSON = "json";
+export const LLM_OUTPUT_FORMAT_XML = "xml";
+export const LLM_OUTPUT_FORMAT_TEXTLINES = "textlines";
+export const LLM_OUTPUT_FORMAT_ALL = [
+  LLM_OUTPUT_FORMAT_AUTO,
+  LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_XML,
+  LLM_OUTPUT_FORMAT_TEXTLINES,
+];
+
 // export const OPT_DICT_BAIDU = "Baidu";
 export const OPT_DICT_BING = "Bing";
 export const OPT_DICT_YOUDAO = "Youdao";
@@ -161,9 +172,7 @@ export const API_SPE_TYPES = {
     OPT_TRANS_EPHONEAI,
   ]),
   // 赞助商
-  sponsors: new Set([
-    OPT_TRANS_EPHONEAI
-  ])
+  sponsors: new Set([OPT_TRANS_EPHONEAI]),
 };
 
 export const BUILTIN_STONES = [
@@ -466,6 +475,29 @@ Output:
 
 Fail-safe: On error, return "{id} | {original_text}" line by line.`;
 
+export const resolveLlmOutputFormat = ({
+  llmOutputFormat,
+  systemPrompt = "",
+} = {}) => {
+  if (LLM_OUTPUT_FORMAT_ALL.includes(llmOutputFormat)) {
+    return llmOutputFormat;
+  }
+
+  if (systemPrompt === defaultSystemPrompt) {
+    return LLM_OUTPUT_FORMAT_JSON;
+  }
+
+  if (systemPrompt === defaultSystemPromptXml) {
+    return LLM_OUTPUT_FORMAT_XML;
+  }
+
+  if (systemPrompt === defaultSystemPromptLines) {
+    return LLM_OUTPUT_FORMAT_TEXTLINES;
+  }
+
+  return LLM_OUTPUT_FORMAT_AUTO;
+};
+
 // const defaultSubtitlePrompt = `Goal: Convert raw subtitle event JSON into a clean, sentence-based JSON array.
 
 // Output (valid JSON array, output ONLY this array):
@@ -535,6 +567,7 @@ const defaultApi = {
   key: "",
   model: "", // 模型名称
   systemPrompt: defaultSystemPromptXml,
+  llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
   subtitlePrompt: defaultSubtitlePrompt,
   nobatchPrompt: defaultNobatchPrompt,
   nobatchUserPrompt: defaultNobatchUserPrompt,

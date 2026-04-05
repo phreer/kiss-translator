@@ -39,6 +39,11 @@ import {
   defaultSystemPromptXml,
   defaultSystemPromptLines,
   INPUT_PLACE_SUMMARY,
+  LLM_OUTPUT_FORMAT_AUTO,
+  LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_XML,
+  LLM_OUTPUT_FORMAT_TEXTLINES,
+  resolveLlmOutputFormat,
 } from "../config";
 import { msAuth } from "../libs/auth";
 import { genDeeplFree } from "./deepl";
@@ -52,8 +57,10 @@ import {
 } from "../libs/utils";
 import {
   parseStreamingSegments,
+  parseStreamingTextLineSegments,
+  parseStreamingXmlSegments,
   createStreamingJsonParser,
-  detectStreamFormat,
+  detectStreamJsonFormat,
   getStreamDelta,
 } from "../libs/stream";
 import { kissLog } from "../libs/log";
@@ -104,7 +111,7 @@ const genSystemPrompt = ({
     .replaceAll(INPUT_PLACE_TO_LANG, toLang)
     .replaceAll(INPUT_PLACE_TEXT, texts[0]);
 
-const genUserPrompt = ({
+export const genUserPrompt = ({
   nobatchUserPrompt,
   useBatchFetch,
   tone,
@@ -176,7 +183,70 @@ const genSubtitlePrompt = ({
     .replaceAll(INPUT_PLACE_TO_LANG, toLang);
 };
 
-const parseAIRes = (raw, useBatchFetch = true) => {
+const parseAIResByJson = (content) => {
+  try {
+    const jsonStr = extractJson(content);
+    if (!jsonStr) {
+      return null;
+    }
+
+    const parsed = JSON.parse(jsonStr);
+    const list = Array.isArray(parsed)
+      ? parsed
+      : parsed.translations || (parsed.result ? [parsed.result] : [parsed]);
+
+    if (
+      list.length > 0 &&
+      (list[0].text !== undefined || list[0].translations)
+    ) {
+      return list.map((item) => [
+        String(item.text || ""),
+        String(item.sourceLanguage || ""),
+      ]);
+    }
+  } catch (e) {
+    //
+  }
+
+  return null;
+};
+
+const parseAIResByXml = (content) => {
+  const xmlTagPattern = /<(t|item|seg)\b/i;
+  if (!xmlTagPattern.test(content)) {
+    return null;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content, "text/html");
+    const elements = doc.querySelectorAll("t, item, seg");
+
+    if (elements.length > 0) {
+      return Array.from(elements).map((el) => [
+        el.innerHTML.trim(),
+        el.getAttribute("sourceLanguage") || "",
+      ]);
+    }
+  } catch (e) {
+    //
+  }
+
+  return null;
+};
+
+const parseAIResByTextLines = (content) =>
+  content.split("\n").map((line) => {
+    const pipeMatch = line.match(/^\d+\s*\|\s*(.*)/);
+    if (pipeMatch) {
+      return [pipeMatch[1].trim(), ""];
+    }
+
+    const text = line.replace(/<br\s*\/?>/gi, "\n").trim();
+    return [text, ""];
+  });
+
+export const parseAIRes = (raw, useBatchFetch = true, llmOutputFormat) => {
   if (!raw) {
     return [];
   }
@@ -204,62 +274,24 @@ const parseAIRes = (raw, useBatchFetch = true) => {
 
   let content = stripMarkdownCodeBlock(raw).trim();
 
-  // JSON
-  try {
-    const start = content.search(/(\{|\[)/);
-    const end = content.lastIndexOf(content.includes("}") ? "}" : "]");
-
-    if (start > -1 && end > -1) {
-      const jsonStr = content.substring(start, end + 1);
-      const parsed = JSON.parse(jsonStr);
-
-      const list = Array.isArray(parsed)
-        ? parsed
-        : parsed.translations || (parsed.result ? [parsed.result] : [parsed]);
-
-      if (
-        list.length > 0 &&
-        (list[0].text !== undefined || list[0].translations)
-      ) {
-        return list.map((item) => [
-          String(item.text || ""),
-          String(item.sourceLanguage || ""),
-        ]);
-      }
-    }
-  } catch (e) {
-    //
+  switch (llmOutputFormat) {
+    case LLM_OUTPUT_FORMAT_JSON:
+      return parseAIResByJson(content) || [];
+    case LLM_OUTPUT_FORMAT_XML:
+      return parseAIResByXml(content) || [];
+    case LLM_OUTPUT_FORMAT_TEXTLINES:
+      return parseAIResByTextLines(content);
+    case LLM_OUTPUT_FORMAT_AUTO:
+    case undefined:
+    case null:
+      return (
+        parseAIResByJson(content) ||
+        parseAIResByXml(content) ||
+        parseAIResByTextLines(content)
+      );
+    default:
+      return parseAIResByTextLines(content);
   }
-
-  // XML
-  const xmlTagPattern = /<(t|item|seg)\b/i;
-  if (xmlTagPattern.test(content)) {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(content, "text/html");
-      const elements = doc.querySelectorAll("t, item, seg");
-
-      if (elements.length > 0) {
-        return Array.from(elements).map((el) => [
-          el.innerHTML.trim(),
-          el.getAttribute("sourceLanguage") || "",
-        ]);
-      }
-    } catch (e) {
-      //
-    }
-  }
-
-  // 纯文本换行
-  return content.split("\n").map((line) => {
-    const pipeMatch = line.match(/^\d+\s*\|\s*(.*)/);
-    if (pipeMatch) {
-      return [pipeMatch[1].trim(), ""];
-    }
-
-    const text = line.replace(/<br\s*\/?>/gi, "\n").trim();
-    return [text, ""];
-  });
 };
 
 const parseSTRes = (raw) => {
@@ -280,6 +312,9 @@ const parseSTRes = (raw) => {
 
   return [];
 };
+
+const getLlmOutputFormat = ({ llmOutputFormat, systemPrompt }) =>
+  resolveLlmOutputFormat({ llmOutputFormat, systemPrompt });
 
 const genGoogle = ({ texts, from, to, url, key }) => {
   const params = queryString.stringify({
@@ -805,41 +840,41 @@ export const genTransReq = async ({ reqHook, ...args }) => {
 
     args.systemPrompt = events
       ? genSubtitlePrompt({
-        subtitlePrompt,
-        from,
-        to,
-        fromLang,
-        toLang,
-        texts,
-        docInfo,
-        tone,
-        aiTerms,
-      })
+          subtitlePrompt,
+          from,
+          to,
+          fromLang,
+          toLang,
+          texts,
+          docInfo,
+          tone,
+          aiTerms,
+        })
       : genSystemPrompt({
-        systemPrompt: useBatchFetch ? systemPrompt : nobatchPrompt,
-        from,
-        to,
-        fromLang,
-        toLang,
-        texts,
-        docInfo,
-        tone,
-      });
+          systemPrompt: useBatchFetch ? systemPrompt : nobatchPrompt,
+          from,
+          to,
+          fromLang,
+          toLang,
+          texts,
+          docInfo,
+          tone,
+        });
     args.userPrompt = events
       ? JSON.stringify(events)
       : genUserPrompt({
-        nobatchUserPrompt,
-        useBatchFetch,
-        from,
-        to,
-        fromLang,
-        toLang,
-        texts,
-        docInfo,
-        tone,
-        glossary,
-        aiTerms,
-      });
+          nobatchUserPrompt,
+          useBatchFetch,
+          from,
+          to,
+          fromLang,
+          toLang,
+          texts,
+          docInfo,
+          tone,
+          glossary,
+          aiTerms,
+        });
   }
 
   const {
@@ -915,8 +950,15 @@ export const parseTransRes = async (
     userMsg,
     apiType,
     useBatchFetch,
+    llmOutputFormat,
+    systemPrompt,
   }
 ) => {
+  const resolvedLlmOutputFormat = getLlmOutputFormat({
+    llmOutputFormat,
+    systemPrompt,
+  });
+
   // 执行 response hook
   if (resHook?.trim()) {
     try {
@@ -1003,13 +1045,21 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(modelMsg?.content, useBatchFetch);
+      return parseAIRes(
+        modelMsg?.content,
+        useBatchFetch,
+        resolvedLlmOutputFormat
+      );
     case OPT_TRANS_GEMINI:
       modelMsg = res?.candidates?.[0]?.content;
       if (history && userMsg && modelMsg) {
         history.add(userMsg, modelMsg);
       }
-      return parseAIRes(modelMsg?.parts?.[0]?.text ?? "", useBatchFetch);
+      return parseAIRes(
+        modelMsg?.parts?.[0]?.text ?? "",
+        useBatchFetch,
+        resolvedLlmOutputFormat
+      );
     case OPT_TRANS_CLAUDE:
       modelMsg = { role: res?.role, content: res?.content?.text };
       if (history && userMsg && modelMsg) {
@@ -1018,7 +1068,11 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(res?.content?.[0]?.text ?? "", useBatchFetch);
+      return parseAIRes(
+        res?.content?.[0]?.text ?? "",
+        useBatchFetch,
+        resolvedLlmOutputFormat
+      );
     case OPT_TRANS_CLOUDFLAREAI:
       return [[res?.result?.translated_text]];
     case OPT_TRANS_OLLAMA:
@@ -1037,7 +1091,11 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(modelMsg?.content, useBatchFetch);
+      return parseAIRes(
+        modelMsg?.content,
+        useBatchFetch,
+        resolvedLlmOutputFormat
+      );
     case OPT_TRANS_CUSTOMIZE:
       if (useBatchFetch) {
         return (res?.translations ?? res)?.map((item) => [item.text, item.src]);
@@ -1111,6 +1169,8 @@ export async function* handleTranslate(
       fetchInterval,
       fetchLimit,
       httpTimeout,
+      llmOutputFormat: apiSetting.llmOutputFormat,
+      systemPrompt: apiSetting.systemPrompt,
     });
   } else {
     const response = await fetchData(input, init, {
@@ -1152,15 +1212,41 @@ async function* handleTranslateStreamInternal(
   texts,
   input,
   init,
-  { apiType, history, userMsg, usePool, fetchInterval, fetchLimit, httpTimeout }
+  {
+    apiType,
+    history,
+    userMsg,
+    usePool,
+    fetchInterval,
+    fetchLimit,
+    httpTimeout,
+    llmOutputFormat,
+    systemPrompt,
+  }
 ) {
   const results = new Array(texts.length).fill(null);
   let fullContent = "";
   const processedIds = new Set();
+  const resolvedLlmOutputFormat = getLlmOutputFormat({
+    llmOutputFormat,
+    systemPrompt,
+  });
 
   const jsonParser = createStreamingJsonParser();
   let isJsonFormat = false;
   let formatDetected = false;
+
+  const parseStreamSegments = () => {
+    switch (resolvedLlmOutputFormat) {
+      case LLM_OUTPUT_FORMAT_XML:
+        return parseStreamingXmlSegments(fullContent, processedIds);
+      case LLM_OUTPUT_FORMAT_TEXTLINES:
+        return parseStreamingTextLineSegments(fullContent, processedIds);
+      case LLM_OUTPUT_FORMAT_AUTO:
+      default:
+        return parseStreamingSegments(fullContent, processedIds);
+    }
+  };
 
   try {
     for await (const rawData of fetchStream(input, init, {
@@ -1179,7 +1265,10 @@ async function* handleTranslateStreamInternal(
           fullContent = stripMarkdownCodeBlock(fullContent, true);
 
           if (!formatDetected) {
-            const { isJson, detected } = detectStreamFormat(fullContent);
+            const { isJson, detected } = detectStreamJsonFormat(
+              resolvedLlmOutputFormat,
+              fullContent
+            );
             if (detected) {
               formatDetected = true;
               isJsonFormat = isJson;
@@ -1199,10 +1288,7 @@ async function* handleTranslateStreamInternal(
               yield { id, result: translation };
             }
           } else {
-            for (const { id, translation } of parseStreamingSegments(
-              fullContent,
-              processedIds
-            )) {
+            for (const { id, translation } of parseStreamSegments()) {
               results[id] = translation;
               yield { id, result: translation };
             }
@@ -1224,7 +1310,7 @@ async function* handleTranslateStreamInternal(
   // 最终再解析一次，捕获可能遗漏的段落
   const hasEmpty = results.some((r) => !r);
   if (hasEmpty) {
-    const parsed = parseAIRes(fullContent, true);
+    const parsed = parseAIRes(fullContent, true, resolvedLlmOutputFormat);
     for (let i = 0; i < texts.length && i < parsed.length; i++) {
       if (!results[i]) {
         results[i] = parsed[i];

@@ -1,5 +1,9 @@
 import { JSONParser } from "@streamparser/json";
 import {
+  LLM_OUTPUT_FORMAT_AUTO,
+  LLM_OUTPUT_FORMAT_JSON,
+  LLM_OUTPUT_FORMAT_XML,
+  LLM_OUTPUT_FORMAT_TEXTLINES,
   OPT_TRANS_OPENAI,
   OPT_TRANS_GEMINI,
   OPT_TRANS_GEMINI_2,
@@ -113,13 +117,26 @@ export function getStreamDelta(json, apiType) {
 export function* parseStreamingSegments(content, processedIds) {
   if (!content) return;
 
-  // 尝试解析 XML 格式: <t id="0" sourceLanguage="en">翻译内容</t>
+  let hasXml = false;
+  for (const segment of parseStreamingXmlSegments(content, processedIds)) {
+    hasXml = true;
+    yield segment;
+  }
+
+  if (hasXml) return;
+
+  for (const segment of parseStreamingTextLineSegments(content, processedIds)) {
+    yield segment;
+  }
+}
+
+export function* parseStreamingXmlSegments(content, processedIds) {
+  if (!content) return;
+
   const xmlRegex =
     /<(t|item|seg)\s+id="(\d+)"(?:\s+sourceLanguage="([^"]*)")?[^>]*>([\s\S]*?)<\/\1>/gi;
   let match;
-  let hasXml = false;
   while ((match = xmlRegex.exec(content)) !== null) {
-    hasXml = true;
     const id = parseInt(match[2], 10);
     if (!processedIds.has(id)) {
       processedIds.add(id);
@@ -128,10 +145,11 @@ export function* parseStreamingSegments(content, processedIds) {
       yield { id, translation };
     }
   }
+}
 
-  if (hasXml) return;
+export function* parseStreamingTextLineSegments(content, processedIds) {
+  if (!content) return;
 
-  // 尝试解析行格式: 0 | 翻译内容
   const endsWithNewline = content.endsWith("\n");
   const lines = content.split("\n");
   const linesToProcess = endsWithNewline ? lines : lines.slice(0, -1);
@@ -237,4 +255,23 @@ export function detectStreamFormat(content) {
 
   const first = positions.reduce((a, b) => (a.pos < b.pos ? a : b));
   return { isJson: first.type === "json", detected: true };
+}
+
+export function detectStreamJsonFormat(llmOutputFormat, content) {
+  if (llmOutputFormat === LLM_OUTPUT_FORMAT_JSON) {
+    return { isJson: true, detected: true };
+  }
+
+  if (
+    llmOutputFormat === LLM_OUTPUT_FORMAT_XML ||
+    llmOutputFormat === LLM_OUTPUT_FORMAT_TEXTLINES
+  ) {
+    return { isJson: false, detected: true };
+  }
+
+  if (llmOutputFormat === LLM_OUTPUT_FORMAT_AUTO) {
+    return detectStreamFormat(content);
+  }
+
+  return { isJson: false, detected: false };
 }
