@@ -233,7 +233,10 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     //   return acc;
     // }, {});
     // update(updatedFields);
-    update(formData);
+    update({
+      ...formData,
+      llmTemplatePreset: currentTemplatePreset,
+    });
   };
 
   const handleReset = () => {
@@ -332,21 +335,28 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
     ]
   );
 
+  const currentTemplatePreset =
+    promptPreview.preset || llmTemplatePreset || LLM_TEMPLATE_PRESET_CUSTOM;
+
   const templateWarnings = useMemo(
     () =>
       validateTemplateSettings({
+        llmTemplatePreset: currentTemplatePreset,
         llmInputTemplate,
         llmOutputTemplate,
         llmOutputSegmentTemplate,
         llmOutputSegmentsSeparator,
         llmOutputMappingMode,
+        useStream,
       }),
     [
+      currentTemplatePreset,
       llmInputTemplate,
       llmOutputTemplate,
       llmOutputSegmentTemplate,
       llmOutputSegmentsSeparator,
       llmOutputMappingMode,
+      useStream,
     ]
   );
 
@@ -509,7 +519,7 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
                 size="small"
                 label={i18n("llm_output_format")}
                 name="llmTemplatePreset"
-                value={llmTemplatePreset}
+                value={currentTemplatePreset}
                 onChange={handleChange}
                 helperText={i18n("llm_output_format_helper")}
               >

@@ -54,6 +54,7 @@ import {
   LLM_OUTPUT_FORMAT_AUTO,
   LLM_OUTPUT_FORMAT_JSON,
   LLM_OUTPUT_FORMAT_PERCENT,
+  LLM_TEMPLATE_PRESET_CUSTOM,
   LLM_OUTPUT_MAPPING_BY_ID,
   LLM_OUTPUT_MAPPING_BY_ORDER,
   detectLlmTemplatePreset,
@@ -436,11 +437,13 @@ export const getLlmPromptPreview = ({
 };
 
 export const validateTemplateSettings = ({
+  llmTemplatePreset,
   llmOutputSegmentTemplate,
   llmOutputSegmentsSeparator,
   llmOutputMappingMode,
   llmInputTemplate,
   llmOutputTemplate,
+  useStream,
 } = {}) => {
   const warnings = [];
 
@@ -471,6 +474,12 @@ export const validateTemplateSettings = ({
   ) {
     warnings.push(
       "by_order mapping should define an output segment separator."
+    );
+  }
+
+  if (useStream && llmTemplatePreset === LLM_TEMPLATE_PRESET_CUSTOM) {
+    warnings.push(
+      "Custom templates do not yet support fully generic streaming parsing. Final non-stream parsing is more reliable."
     );
   }
 
