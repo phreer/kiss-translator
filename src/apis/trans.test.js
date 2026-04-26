@@ -157,6 +157,28 @@ describe("parseAIRes", () => {
     expect(preview.sampleOutput).toContain("你好，世界");
   });
 
+  it("derives runtime preset from templates before llmOutputFormat", () => {
+    const preview = getLlmPromptPreview({
+      translationRules: defaultLlmRulesPrompt,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_JSON,
+      ...getLlmTemplatePreset(LLM_OUTPUT_FORMAT_PERCENT),
+    });
+
+    expect(preview.preset).toBe(LLM_OUTPUT_FORMAT_PERCENT);
+    expect(preview.templateMeta.llmOutputFormat).toBe(
+      LLM_OUTPUT_FORMAT_PERCENT
+    );
+  });
+
+  it("keeps llmOutputFormat as fallback when templates are missing", () => {
+    const preview = getLlmPromptPreview({
+      translationRules: defaultLlmRulesPrompt,
+      llmOutputFormat: LLM_OUTPUT_FORMAT_XML,
+    });
+
+    expect(preview.templateMeta.llmOutputFormat).toBe(LLM_OUTPUT_FORMAT_XML);
+  });
+
   it("renders percent input template for batch prompts", () => {
     const prompt = genUserPrompt({
       useBatchFetch: true,

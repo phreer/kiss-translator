@@ -222,7 +222,7 @@ const SAMPLE_PROMPT_OUTPUT_SEGMENTS = [
 ];
 
 const normalizeLlmTemplates = ({
-  llmOutputFormat,
+  llmTemplatePreset,
   llmInputTemplate,
   llmInputSegmentTemplate,
   llmInputSegmentsSeparator,
@@ -231,7 +231,7 @@ const normalizeLlmTemplates = ({
   llmOutputSegmentsSeparator,
   llmOutputMappingMode,
 }) => {
-  const preset = getLlmTemplatePreset(llmOutputFormat) || jsonTemplateDefaults;
+  const preset = getLlmTemplatePreset(llmTemplatePreset) || jsonTemplateDefaults;
 
   return {
     llmInputTemplate: llmInputTemplate || preset.llmInputTemplate,
@@ -262,15 +262,33 @@ const buildTemplateMeta = ({
   llmOutputMappingMode,
   systemPrompt,
 }) => {
-  const resolvedFormat = resolveLlmOutputFormat({
+  const detectedPreset = detectLlmTemplatePreset({
     llmOutputFormat,
-    systemPrompt,
+    llmInputTemplate,
+    llmInputSegmentTemplate,
+    llmInputSegmentsSeparator,
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
   });
 
+  const templatePreset =
+    detectedPreset !== LLM_TEMPLATE_PRESET_CUSTOM
+      ? detectedPreset
+      : resolveLlmOutputFormat({
+          llmOutputFormat,
+          systemPrompt,
+        });
+
   return {
-    llmOutputFormat: resolvedFormat,
+    llmTemplatePreset: detectedPreset,
+    llmOutputFormat: templatePreset,
     ...normalizeLlmTemplates({
-      llmOutputFormat: resolvedFormat,
+      llmTemplatePreset:
+        detectedPreset !== LLM_TEMPLATE_PRESET_CUSTOM
+          ? detectedPreset
+          : templatePreset,
       llmInputTemplate,
       llmInputSegmentTemplate,
       llmInputSegmentsSeparator,
