@@ -2248,42 +2248,42 @@ export const I18N = {
     ja: `プレースホルダータグ名`,
     ko: `플레이스홀더 태그 이름`,
   },
-  llm_output_format: {
+  llm_template_preset: {
     zh: `模板预设`,
     en: `Template Preset`,
     zh_TW: `模板預設`,
     ja: `テンプレートプリセット`,
     ko: `템플릿 프리셋`,
   },
-  llm_output_format_helper: {
+  llm_template_preset_helper: {
     zh: `普通用户可直接选择预设；高级用户可在下方模板参数中进一步自定义。`,
     en: `Choose a preset for common cases, or customize the template fields below for advanced usage.`,
     zh_TW: `一般使用者可直接選擇預設；進階使用者可在下方模板參數中進一步自訂。`,
     ja: `通常はプリセットを選び、高度な用途では下のテンプレート項目を調整してください。`,
     ko: `일반적인 경우에는 프리셋을 선택하고, 고급 사용자는 아래 템플릿 항목을 직접 조정하세요.`,
   },
-  llm_output_format_json: {
+  llm_template_preset_json: {
     zh: `JSON`,
     en: `JSON`,
     zh_TW: `JSON`,
     ja: `JSON`,
     ko: `JSON`,
   },
-  llm_output_format_xml: {
+  llm_template_preset_xml: {
     zh: `XML`,
     en: `XML`,
     zh_TW: `XML`,
     ja: `XML`,
     ko: `XML`,
   },
-  llm_output_format_textlines: {
+  llm_template_preset_textlines: {
     zh: `多行文本`,
     en: `Text Lines`,
     zh_TW: `多行文字`,
     ja: `複数行テキスト`,
     ko: `여러 줄 텍스트`,
   },
-  llm_output_format_percent: {
+  llm_template_preset_percent: {
     zh: `%% 分隔`,
     en: `%% Delimited`,
     zh_TW: `%% 分隔`,

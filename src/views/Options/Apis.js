@@ -129,23 +129,23 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
   const [showMore, setShowMore] = useState(false);
   const confirm = useConfirm();
 
-  const llmOutputFormatOptions = useMemo(
+  const templatePresetOptions = useMemo(
     () => [
       {
         value: LLM_OUTPUT_FORMAT_JSON,
-        label: i18n("llm_output_format_json"),
+        label: i18n("llm_template_preset_json"),
       },
       {
         value: LLM_OUTPUT_FORMAT_XML,
-        label: i18n("llm_output_format_xml"),
+        label: i18n("llm_template_preset_xml"),
       },
       {
         value: LLM_OUTPUT_FORMAT_TEXTLINES,
-        label: i18n("llm_output_format_textlines"),
+        label: i18n("llm_template_preset_textlines"),
       },
       {
         value: LLM_OUTPUT_FORMAT_PERCENT,
-        label: i18n("llm_output_format_percent"),
+        label: i18n("llm_template_preset_percent"),
       },
       {
         value: LLM_TEMPLATE_PRESET_CUSTOM,
@@ -517,13 +517,13 @@ function ApiFields({ apiSlug, isUserApi, deleteApi, copyApi }) {
               <TextField
                 select
                 size="small"
-                label={i18n("llm_output_format")}
+                label={i18n("llm_template_preset")}
                 name="llmTemplatePreset"
                 value={currentTemplatePreset}
                 onChange={handleChange}
-                helperText={i18n("llm_output_format_helper")}
+                helperText={i18n("llm_template_preset_helper")}
               >
-                {llmOutputFormatOptions.map((item) => (
+                {templatePresetOptions.map((item) => (
                   <MenuItem key={item.value} value={item.value}>
                     {item.label}
                   </MenuItem>
