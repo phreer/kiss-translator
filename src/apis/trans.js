@@ -78,7 +78,6 @@ import {
   parseStreamingTextLineSegments,
   parseStreamingXmlSegments,
   createStreamingJsonParser,
-  detectStreamJsonFormat,
   getStreamDelta,
 } from "../libs/stream";
 import { kissLog } from "../libs/log";
@@ -801,6 +800,77 @@ const parseWithTemplateBySegments = ({
   });
 
   return parsed.filter((item) => item !== undefined);
+};
+
+const parseStreamingTemplateSegments = ({
+  content,
+  processedIds,
+  templateMeta,
+}) => {
+  const {
+    llmOutputTemplate,
+    llmOutputSegmentTemplate,
+    llmOutputSegmentsSeparator,
+    llmOutputMappingMode,
+  } = templateMeta;
+
+  if (!llmOutputSegmentTemplate || !llmOutputSegmentsSeparator) {
+    return [];
+  }
+
+  let body = content;
+  if (
+    llmOutputTemplate &&
+    llmOutputTemplate.includes(TEMPLATE_SEGMENTS_PLACEHOLDER)
+  ) {
+    const [prefix = ""] = llmOutputTemplate.split(TEMPLATE_SEGMENTS_PLACEHOLDER);
+    if (prefix) {
+      if (!body.startsWith(prefix)) {
+        return [];
+      }
+      body = body.slice(prefix.length);
+    }
+  }
+
+  const chunks = body.split(llmOutputSegmentsSeparator);
+  const completedChunks = chunks.slice(0, -1);
+  const { regex, fields } = compileSegmentTemplateRegex(llmOutputSegmentTemplate);
+  const parsed = [];
+
+  completedChunks.forEach((chunk, index) => {
+    const trimmed = chunk.trim();
+    if (!trimmed) return;
+
+    const match = trimmed.match(regex);
+    if (!match) return;
+
+    let id = index;
+    let translation = "";
+    let sourceLanguage = "";
+
+    fields.forEach((field, fieldIndex) => {
+      const rawValue = match[fieldIndex + 1];
+      const normalized =
+        field.modifier === "|json" ? stripJsonLine(rawValue) : rawValue;
+
+      if (field.field === "id") {
+        id = parseInt(normalized, 10);
+      } else if (field.field === "translation") {
+        translation = String(normalized ?? "");
+      } else if (field.field === "source_language") {
+        sourceLanguage = String(normalized ?? "");
+      }
+    });
+
+    const resultId =
+      llmOutputMappingMode === LLM_OUTPUT_MAPPING_BY_ORDER ? index : id;
+    if (processedIds.has(resultId)) return;
+
+    processedIds.add(resultId);
+    parsed.push({ id: resultId, translation: [translation, sourceLanguage] });
+  });
+
+  return parsed;
 };
 
 export const parseAIRes = (
@@ -1906,10 +1976,17 @@ async function* handleTranslateStreamInternal(
   });
 
   const jsonParser = createStreamingJsonParser();
-  let isJsonFormat = false;
-  let formatDetected = false;
+  const isJsonFormat = templateMeta.llmOutputFormat === LLM_OUTPUT_FORMAT_JSON;
 
   const parseStreamSegments = () => {
+    if (templateMeta.llmTemplatePreset === LLM_TEMPLATE_PRESET_CUSTOM) {
+      return parseStreamingTemplateSegments({
+        content: fullContent,
+        processedIds,
+        templateMeta,
+      });
+    }
+
     switch (templateMeta.llmOutputFormat) {
       case LLM_OUTPUT_FORMAT_XML:
         return parseStreamingXmlSegments(fullContent, processedIds);
@@ -1939,25 +2016,7 @@ async function* handleTranslateStreamInternal(
           fullContent += delta;
           fullContent = stripMarkdownCodeBlock(fullContent, true);
 
-          if (!formatDetected) {
-            const { isJson, detected } = detectStreamJsonFormat(
-              templateMeta.llmOutputFormat,
-              fullContent
-            );
-            if (detected) {
-              formatDetected = true;
-              isJsonFormat = isJson;
-              // 格式检测成功后，将累积的内容写入解析器
-              if (isJsonFormat) {
-                for (const { id, translation } of jsonParser.write(
-                  fullContent
-                )) {
-                  results[id] = translation;
-                  yield { id, result: translation };
-                }
-              }
-            }
-          } else if (isJsonFormat) {
+          if (isJsonFormat) {
             for (const { id, translation } of jsonParser.write(delta)) {
               results[id] = translation;
               yield { id, result: translation };

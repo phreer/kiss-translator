@@ -53,6 +53,18 @@ describe("detectStreamJsonFormat", () => {
       detected: true,
     });
   });
+
+  it("does not guess explicit non-json formats from content", () => {
+    expect(
+      detectStreamJsonFormat(
+        LLM_OUTPUT_FORMAT_PERCENT,
+        '{"translations":[{"id":0,"text":"你好"}]}'
+      )
+    ).toEqual({
+      isJson: false,
+      detected: true,
+    });
+  });
 });
 
 describe("parseStreamingXmlSegments", () => {
