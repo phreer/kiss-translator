@@ -45,6 +45,7 @@
     "zip": "zx src/scripts/archive.mjs",
     "build+zip": "cross-env CI=true pnpm build && pnpm zip",
     "test": "react-app-rewired test",
+    "test:manual-ollama": "CI=true REACT_APP_CLIENT=web react-app-rewired test --runInBand --watchAll=false --runTestsByPath src/apis/trans.manual.test.js",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
