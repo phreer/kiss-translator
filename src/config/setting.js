@@ -112,8 +112,10 @@ line-height: 1.3;
 text-shadow: 1px 1px 2px black;
 display: inline-block`;
 
-const SUBTITLE_ORIGIN_STYLE = `font-size: clamp(1rem, 2cqw, 3rem);`;
-const SUBTITLE_TRANSLATION_STYLE = `font-size: clamp(1rem, 2cqw, 3rem);`;
+const SUBTITLE_ORIGIN_STYLE = `font-size: clamp(1rem, 2cqw, 3rem);
+font-family: inherit;`;
+const SUBTITLE_TRANSLATION_STYLE = `font-size: clamp(1rem, 2cqw, 3rem);
+font-family: inherit;`;
 
 export const OPT_ENHANCE_ON = "on";
 export const OPT_ENHANCE_OFF = "off";

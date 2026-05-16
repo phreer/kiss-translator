@@ -2,7 +2,10 @@ import { logger } from "../libs/log.js";
 import { downloadBlobFile } from "../libs/utils.js";
 import { buildBilingualVtt } from "./vtt.js";
 import { getSettingWithDefault } from "../libs/storage.js";
-import { normalizeLocaleLang } from "../libs/localeTypography.js";
+import {
+  getLocaleFontFamily,
+  normalizeLocaleLang,
+} from "../libs/localeTypography.js";
 
 /**
  * YouTube 字幕列表管理器
@@ -86,8 +89,15 @@ export class YouTubeSubtitleList {
   setTranslationLang(lang) {
     this.translationLang = lang || "";
 
+    const fontFamily = getLocaleFontFamily(this.translationLang);
     const normalizedLang = normalizeLocaleLang(this.translationLang);
     if (this.container) {
+      if (fontFamily) {
+        this.container.style.setProperty("--kt-translation-font", fontFamily);
+      } else {
+        this.container.style.removeProperty("--kt-translation-font");
+      }
+
       if (normalizedLang) {
         this.container.setAttribute("data-translation-lang", normalizedLang);
       } else {
@@ -490,7 +500,7 @@ export class YouTubeSubtitleList {
     translationEl.className = "kiss-youtube-translation";
     translationEl.textContent = sub.translation || "";
     translationEl.style.display = sub.translation ? "block" : "none";
-    translationEl.style.cssText = `color: var(--kt-subtext); font-size: 13px; line-height: 1.4; font-style: italic; min-height: 18px;`;
+    translationEl.style.cssText = `color: var(--kt-subtext); font-size: 13px; line-height: 1.4; font-style: italic; min-height: 18px; font-family: var(--kt-translation-font, inherit);`;
     if (this.translationLang) {
       translationEl.setAttribute(
         "lang",
