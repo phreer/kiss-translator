@@ -681,6 +681,7 @@ class YouTubeCaptionProvider {
     if (isEnhance && showList && !this.#subtitleListManager) {
       // 初始化字幕列表管理器
       this.#subtitleListManager = new YouTubeSubtitleList(videoEl);
+      this.#subtitleListManager.setTranslationLang(this.#setting.toLang);
       this.#subtitleListManager.initialize(this.#subtitles);
 
       // todo: 将 subtitleListManager 实例传入 managerInstance

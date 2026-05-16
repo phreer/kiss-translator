@@ -4,6 +4,7 @@ import { apiTranslate } from "../apis/index.js";
 import { apiMicrosoftDict } from "../apis/index.js";
 import { trustedTypesHelper } from "../libs/trustedTypes.js";
 import { isMobile } from "../libs/mobile.js";
+import { applyLocaleTypography } from "../libs/localeTypography.js";
 
 // 添加CSS样式用于高亮显示悬停的单词
 const addWordHoverStyles = () => {
@@ -667,6 +668,7 @@ export class BilingualSubtitleManager {
       // 创建带有单词标记的字幕内容
       const p1 = document.createElement("p");
       p1.style.cssText = this.#setting.originStyle;
+      applyLocaleTypography(p1, this.#setting.fromLang);
 
       const enhanceMode = this.#setting.enhanceMode ?? "mobile_off";
       const isEnhance =
@@ -682,6 +684,7 @@ export class BilingualSubtitleManager {
 
       const p2 = document.createElement("p");
       p2.style.cssText = this.#setting.translationStyle;
+      applyLocaleTypography(p2, this.#setting.toLang);
       if (isEnhance) {
         p2.innerHTML = trustedTypesHelper.createHTML(
           this.#wrapWordsWithSpans(subtitle.translation || "...")

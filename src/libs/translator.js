@@ -30,6 +30,7 @@ import { kissLog } from "./log";
 import { clearAllBatchQueue } from "./batchQueue";
 import { genTextClass } from "./style";
 import { createLoadingSVG, createRetrySVG } from "./svg";
+import { applyLocaleTypography } from "./localeTypography";
 import { shortcutRegister } from "./shortcut";
 import { tryDetectLang } from "./detect";
 import { trustedTypesHelper } from "./trustedTypes";
@@ -1294,6 +1295,7 @@ export class Translator {
       if (textExtStyle?.trim()) {
         inner.style.cssText = textExtStyle; // 附加内联样式
       }
+      applyLocaleTypography(inner, toLang);
       inner.appendChild(createLoadingSVG());
       wrapper.appendChild(inner);
       nodes[nodes.length - 1].after(wrapper);

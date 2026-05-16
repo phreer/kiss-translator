@@ -2,6 +2,7 @@ import { logger } from "../libs/log.js";
 import { downloadBlobFile } from "../libs/utils.js";
 import { buildBilingualVtt } from "./vtt.js";
 import { getSettingWithDefault } from "../libs/storage.js";
+import { normalizeLocaleLang } from "../libs/localeTypography.js";
 
 /**
  * YouTube 字幕列表管理器
@@ -17,6 +18,7 @@ export class YouTubeSubtitleList {
    */
   constructor(videoElement) {
     this.videoEl = videoElement;
+    this.translationLang = "";
 
     // --- 数据源 ---
     // 统一字幕数据结构: { start: number, end: number, text: string, translation: string }
@@ -78,6 +80,19 @@ export class YouTubeSubtitleList {
       // 如果 UI 不存在，创建 UI
       this.createSubtitleList();
       this.setupEventListeners();
+    }
+  }
+
+  setTranslationLang(lang) {
+    this.translationLang = lang || "";
+
+    const normalizedLang = normalizeLocaleLang(this.translationLang);
+    if (this.container) {
+      if (normalizedLang) {
+        this.container.setAttribute("data-translation-lang", normalizedLang);
+      } else {
+        this.container.removeAttribute("data-translation-lang");
+      }
     }
   }
 
@@ -254,6 +269,7 @@ export class YouTubeSubtitleList {
       // 将容器插入到 YouTube 页面右侧栏 (secondary) 的顶部
       const secondary = document.getElementById("secondary-inner");
       if (secondary) secondary.prepend(this.container);
+      this.setTranslationLang(this.translationLang);
 
       (async () => {
         try {
@@ -475,6 +491,13 @@ export class YouTubeSubtitleList {
     translationEl.textContent = sub.translation || "";
     translationEl.style.display = sub.translation ? "block" : "none";
     translationEl.style.cssText = `color: var(--kt-subtext); font-size: 13px; line-height: 1.4; font-style: italic; min-height: 18px;`;
+    if (this.translationLang) {
+      translationEl.setAttribute(
+        "lang",
+        this.container?.getAttribute("data-translation-lang") ||
+          this.translationLang
+      );
+    }
 
     // 事件
     li.addEventListener("click", () => this.jumpToTime(sub.start));
