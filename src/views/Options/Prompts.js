@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import BugReportIcon from "@mui/icons-material/BugReport";
 import AddIcon from "@mui/icons-material/Add";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -48,7 +49,10 @@ import {
   normalizePrompt,
 } from "../../config";
 import { usePromptList } from "../../hooks/Prompt";
+import { useApiList } from "../../hooks/Api";
+import { useSetting } from "../../hooks/Setting";
 import CodeField from "./CodeField";
+import PromptTestDialog from "./PromptTestDialog";
 
 const TRANSLATION_PROMPT_PLACEHOLDERS = [
   INPUT_PLACE_TEXT,
@@ -181,6 +185,7 @@ function PromptFields({
   onCopy,
   onDelete,
   onCollapse,
+  onTest,
 }) {
   const i18n = useI18n();
   const confirm = useConfirm();
@@ -192,6 +197,10 @@ function PromptFields({
   const showUserPrompt =
     formData.category === PROMPT_CATEGORY_USER ||
     formData.category === PROMPT_CATEGORY_DICTIONARY;
+  // 只有翻译相关的 prompt 类型支持测试
+  const showTestButton =
+    formData.category === PROMPT_CATEGORY_USER ||
+    formData.category === PROMPT_CATEGORY_BATCH_SYSTEM;
 
   useLayoutEffect(() => {
     setFormData(normalizePrompt(prompt));
@@ -365,6 +374,16 @@ function PromptFields({
         >
           {i18n("delete")}
         </Button>
+        {showTestButton && (
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => onTest?.(formData)}
+            startIcon={<BugReportIcon />}
+          >
+            {i18n("prompt_test")}
+          </Button>
+        )}
       </Stack>
     </Stack>
   );
@@ -380,8 +399,12 @@ export default function Prompts() {
     copyPrompt,
     isPresetPromptSlug,
   } = usePromptList();
+  const { aiEnabledApis } = useApiList();
+  const { setting: { subtitleSetting } = {} } = useSetting();
   const [selectedPromptSlug, setSelectedPromptSlug] = useState("");
   const [anchorEl, setAnchorEl] = useState(null);
+  const [testOpen, setTestOpen] = useState(false);
+  const [testPrompt, setTestPrompt] = useState(null);
   const detailPanelRef = useRef(null);
   const addMenuOpen = Boolean(anchorEl);
 
@@ -442,6 +465,16 @@ export default function Prompts() {
   const handleCopyPrompt = (prompt, promptDisplayName) => {
     const promptSlug = copyPrompt(prompt, promptDisplayName);
     setSelectedPromptSlug(promptSlug);
+  };
+
+  const handleOpenTest = (prompt) => {
+    setTestPrompt(prompt);
+    setTestOpen(true);
+  };
+
+  const handleCloseTest = () => {
+    setTestOpen(false);
+    setTestPrompt(null);
   };
 
   return (
@@ -568,11 +601,21 @@ export default function Prompts() {
                 onCopy={handleCopyPrompt}
                 onDelete={deletePrompt}
                 onCollapse={() => setSelectedPromptSlug("")}
+                onTest={handleOpenTest}
               />
             )}
           </Box>
         </Box>
       </Stack>
+
+      <PromptTestDialog
+        open={testOpen}
+        onClose={handleCloseTest}
+        prompt={testPrompt}
+        apis={aiEnabledApis}
+        prompts={prompts}
+        subtitleSetting={subtitleSetting}
+      />
     </Box>
   );
 }
