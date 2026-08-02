@@ -1,4 +1,9 @@
-import { compileTemplate, render, renderTemplate } from "./template";
+import {
+  applyPlaceholders,
+  compileTemplate,
+  render,
+  renderTemplate,
+} from "./template";
 
 const LITERARY_SEGMENTS = [
   {
@@ -551,6 +556,55 @@ describe("template engine", () => {
     test("throws on non-string source", () => {
       expect(() => renderTemplate(null)).toThrow(TypeError);
       expect(() => compileTemplate(123)).toThrow(/must be a string/);
+    });
+  });
+
+  describe("applyPlaceholders", () => {
+    test("replaces provided placeholders", () => {
+      expect(
+        applyPlaceholders("{{title}} - {{text}}", {
+          title: "T",
+          text: "X",
+        })
+      ).toBe("T - X");
+    });
+
+    test("leaves unprovided placeholders untouched", () => {
+      expect(applyPlaceholders("{{title}} {{missing}}", { title: "T" })).toBe(
+        "T {{missing}}"
+      );
+    });
+
+    test("renders null and undefined values as empty string", () => {
+      expect(
+        applyPlaceholders("[{{title}}][{{text}}]", {
+          title: null,
+          text: undefined,
+        })
+      ).toBe("[][]");
+    });
+
+    test("tolerates stray closing tags that the template engine rejects", () => {
+      expect(
+        applyPlaceholders("a }} b {% {{title}}", { title: "T" })
+      ).toBe("a }} b {% T");
+    });
+
+    test("replaces multiple occurrences of the same placeholder", () => {
+      expect(applyPlaceholders("{{tone}}/{{tone}}", { tone: "formal" })).toBe(
+        "formal/formal"
+      );
+    });
+
+    test("is tolerant of non-string templates", () => {
+      expect(applyPlaceholders(null, {})).toBe("");
+      expect(applyPlaceholders(undefined, { title: "T" })).toBe("");
+    });
+
+    test("does not re-substitute a value that itself contains a placeholder", () => {
+      expect(applyPlaceholders("{{text}}", { text: "{{title}}" })).toBe(
+        "{{title}}"
+      );
     });
   });
 });

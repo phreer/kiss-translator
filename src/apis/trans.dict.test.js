@@ -13,10 +13,10 @@ jest.mock("../libs/docInfo", () => ({
 
 jest.mock("../libs/stream", () => ({
   parseStreamingSegments: jest.fn(),
+  parseStreamingPercentSegments: jest.fn(),
   createStreamingJsonParser: jest.fn(),
   createStreamingSubtitleParser: jest.fn(),
   createRealtimeStreamParser: jest.fn(),
-  detectStreamFormat: jest.fn(),
   getStreamDelta: jest.fn(),
 }));
 

@@ -3,9 +3,11 @@ jest.mock("@streamparser/json", () => ({
 }));
 
 import {
+  createRealtimeStreamParser,
   createSSEParser,
   createStreamingSubtitleParser,
   getStreamDelta,
+  parseStreamingPercentSegments,
   parseStreamingSegments,
 } from "./stream";
 import { OPT_TRANS_EPHONEAI } from "../config";
@@ -67,6 +69,129 @@ describe("parseStreamingSegments", () => {
     ];
 
     expect(result).toEqual([{ id: 0, translation: ["第一行\n第二行", ""] }]);
+  });
+
+  test("applies decodeText uniformly to XML and LINE segments", () => {
+    const decodeText = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    const xml = [
+      ...parseStreamingSegments(
+        '<root><t id="0">x &lt;b&gt;y</t></root>',
+        new Set(),
+        { decodeText }
+      ),
+    ];
+    expect(xml).toEqual([{ id: 0, translation: ["x <b>y", ""] }]);
+
+    const line = [
+      ...parseStreamingSegments(
+        "0 | 第一行<br>第二行\n1 | a &lt;b&gt; c\n",
+        new Set(),
+        { decodeText }
+      ),
+    ];
+    // <br> 折叠先于 decodeText，转义实体单趟还原。
+    expect(line).toEqual([
+      { id: 0, translation: ["第一行\n第二行", ""] },
+      { id: 1, translation: ["a <b> c", ""] },
+    ]);
+  });
+
+  test("defaults to identity decode so existing callers are unchanged", () => {
+    const result = [
+      ...parseStreamingSegments(
+        '<root><t id="0" sourceLanguage="en">你好</t></root>',
+        new Set()
+      ),
+    ];
+    expect(result).toEqual([{ id: 0, translation: ["你好", "en"] }]);
+  });
+});
+
+describe("parseStreamingPercentSegments", () => {
+  test("emits only terminated blocks and keeps the typing tail", () => {
+    const result = [
+      ...parseStreamingPercentSegments(
+        "第一段\n\n%%\n\n第二段（未完）",
+        new Set()
+      ),
+    ];
+
+    expect(result).toEqual([{ id: 0, translation: ["第一段", ""] }]);
+  });
+
+  test("emits the trailing block once the separator arrives", () => {
+    const result = [
+      ...parseStreamingPercentSegments(
+        "第一段\n\n%%\n\n第二段\n\n%%\n\n",
+        new Set()
+      ),
+    ];
+
+    expect(result).toEqual([
+      { id: 0, translation: ["第一段", ""] },
+      { id: 1, translation: ["第二段", ""] },
+    ]);
+  });
+
+  test("keeps absolute split indices and skips empty blocks", () => {
+    const result = [
+      ...parseStreamingPercentSegments(
+        "A\n\n%%\n\n\n\n%%\n\nC\n\n%%\n\n",
+        new Set()
+      ),
+    ];
+
+    expect(result).toEqual([
+      { id: 0, translation: ["A", ""] },
+      { id: 2, translation: ["C", ""] },
+    ]);
+  });
+
+  test("deduplicates by processedIds", () => {
+    const result = [
+      ...parseStreamingPercentSegments("A\n\n%%\n\nB\n\n%%\n\n", new Set([0])),
+    ];
+
+    expect(result).toEqual([{ id: 1, translation: ["B", ""] }]);
+  });
+
+  test("applies decodeText to emitted blocks", () => {
+    const decodeText = (s) => s.replace(/\\%/g, "%").replace(/\\\\/g, "\\");
+    const result = [
+      ...parseStreamingPercentSegments(
+        "A\\\\\n\n%%\n\nB\\%\n\n%%\n\n",
+        new Set(),
+        { decodeText }
+      ),
+    ];
+
+    expect(result).toEqual([
+      { id: 0, translation: ["A\\", ""] },
+      { id: 1, translation: ["B%", ""] },
+    ]);
+  });
+});
+
+describe("createRealtimeStreamParser percent", () => {
+  test("identifies percent from the preset format without sniffing", () => {
+    const parser = createRealtimeStreamParser({ format: "percent" });
+
+    expect(parser.write("你")).toEqual([
+      { id: 0, partialText: "你", isComplete: false },
+    ]);
+    expect(parser.write("好\n\n%%\n\n世界")).toEqual([
+      { id: 0, partialText: "你好", isComplete: true },
+      { id: 1, partialText: "世界", isComplete: false },
+    ]);
+  });
+
+  test("marks closed percent blocks complete and typing tail incomplete", () => {
+    const parser = createRealtimeStreamParser({ format: "percent" });
+
+    expect(parser.write("A\n\n%%\n\nB\n\n%%\n\n")).toEqual([
+      { id: 0, partialText: "A", isComplete: true },
+      { id: 1, partialText: "B", isComplete: true },
+    ]);
   });
 });
 

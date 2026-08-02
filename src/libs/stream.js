@@ -166,24 +166,36 @@ export function getStreamDelta(json, apiType) {
   }
 }
 
+const identity = (value) => value;
+
 /**
  * 核心逻辑：从流式响应的文本中（随着大模型源源不断输出），即时抽取出已匹配完成的网页翻译段落。
- * 兼容两种非 JSON 序列化的极速传输协议：XML 包裹协议与“管道符+换行”行协议。
+ * 兼容两种非 JSON 序列化的极速传输协议：XML 包裹协议与"管道符+换行"行协议。
  * @param {string} content 当前累计接收到的流式文本
  * @param {Set<number>} processedIds 已处理并上屏的段落 ID 集合 (用于去重，防重复上屏)
+ * @param {Object} options 解析选项
+ * @param {Function} options.decodeText 译文文本解码函数，与 parseAIRes 一致的实体还原
  * @yields {{ id: number, translation: [string, string] }} 解析出的段落 ID、译文及语种
  */
-export function* parseStreamingSegments(content, processedIds) {
+export function* parseStreamingSegments(
+  content,
+  processedIds,
+  { decodeText = identity } = {}
+) {
   if (!content) return;
 
   // 1. 尝试解析 XML 格式：<t id="0" sourceLanguage="en">译文</t>
   // XML/LINE 的具体字符串解析规则与非流式共用，流式层只负责 processedIds 去重和增量 yield。
+  // 结构与 <br>→换行 折叠由各解析器完成，实体还原统一在这里做一次。
   const xmlSegments = parseXmlTranslationSegments(content);
   if (xmlSegments.length > 0) {
     for (const { id, translation } of xmlSegments) {
       if (!processedIds.has(id)) {
         processedIds.add(id);
-        yield { id, translation };
+        yield {
+          id,
+          translation: [decodeText(translation[0]), translation[1]],
+        };
       }
     }
     return;
@@ -196,8 +208,45 @@ export function* parseStreamingSegments(content, processedIds) {
   })) {
     if (!processedIds.has(id)) {
       processedIds.add(id);
-      yield { id, translation };
+      yield {
+        id,
+        translation: [decodeText(translation[0]), translation[1]],
+      };
     }
+  }
+}
+
+/**
+ * 创建 percent 格式（块之间以 `\n%%\n` 分隔）的流式增量解析器。
+ * 结构与 parseStreamingSegments 保持一致：每次重扫累积文本、id 取绝对 split 索引
+ * （含空块的计数，与 parsePercentTranslationSegments 的 by_order 语义逐字节一致）、
+ * 仅产出已由分隔符终止的块；末尾未终止的块视为"正在打字"，留到下一个 delta 补齐。
+ * @param {string} content 当前累计接收到的流式文本
+ * @param {Set<number>} processedIds 已处理并上屏的段落 ID 集合 (用于去重，防重复上屏)
+ * @param {Object} options 解析选项
+ * @param {Function} options.decodeText 译文文本解码函数，与 parseAIRes 一致的实体还原
+ * @yields {{ id: number, translation: [string, string] }} 解析出的段落 ID 及译文
+ */
+export function* parseStreamingPercentSegments(
+  content,
+  processedIds,
+  { decodeText = identity } = {}
+) {
+  if (!content) return;
+
+  // 不 trim 整段内容：结尾分隔符的换行必须保留，否则 endsWith 判断会失效。
+  const blocks = content.split("\n%%\n");
+  // 以分隔符结尾时所有块都已终止；否则最后一块仍在输出中，不能提前上屏。
+  const terminated = content.endsWith("\n%%\n");
+  const takeUntil = terminated ? blocks.length : blocks.length - 1;
+
+  // slice 保留原始数组索引，entries 的 id 即 by_order 绝对编号。
+  for (const [id, block] of blocks.slice(0, takeUntil).entries()) {
+    const text = block.trim();
+    if (!text) continue;
+    if (processedIds.has(id)) continue;
+    processedIds.add(id);
+    yield { id, translation: [decodeText(text), ""] };
   }
 }
 
@@ -477,55 +526,32 @@ export function createStreamingSubtitleParser(
 }
 
 /**
- * 启发式检测大模型当前响应流的格式类型 (JSON / XML / 行协议)
- * 通过判断最先出现的格式特征符（“{” 或 “<t” 或 “ID|”）进行确认。
- * @param {string} content 首批累积的流内容
- * @returns {{ isJson: boolean, detected: boolean }} 是否是 JSON，以及是否判定成功
- */
-export function detectStreamFormat(content) {
-  const stripped = content.trim();
-
-  // 查找各个特征标志符的索引
-  const jsonStart = stripped.search(/[{[]/);
-  const xmlStart = stripped.search(/<(t|item|seg)\s/i);
-  const lineStart = stripped.search(/^\d+\s*\|/m);
-
-  if (jsonStart === -1 && xmlStart === -1 && lineStart === -1) {
-    return { isJson: false, detected: false };
-  }
-
-  // 找出索引值最小且有效（即最先出现）的格式特征
-  const positions = [
-    { type: "json", pos: jsonStart },
-    { type: "xml", pos: xmlStart },
-    { type: "line", pos: lineStart },
-  ].filter((p) => p.pos !== -1);
-
-  if (positions.length === 0) {
-    return { isJson: false, detected: false };
-  }
-
-  const first = positions.reduce((a, b) => (a.pos < b.pos ? a : b));
-  return { isJson: first.type === "json", detected: true };
-}
-
-/**
  * 创建实时打字机流解析器。
  * 跟踪段落边界，并不仅在段落闭合时输出，而是在大模型打字时实时输出包含
  * { id, partialText: '当前已输出的残缺译文', isComplete: '是否闭合' } 数组，
  * 从而在网页中渲染出极其高级的“边打字边翻译”的 Premium 打字机视觉体验。
+ * 支持 XML、Line 与 percent 三种结构协议；json 协议因未闭合对象无法取到
+ * 稳定段落 id，不提供逐字中间态。
+ * @param {Object} options 解析选项
+ * @param {string} [options.format] 已知的输出格式名（preset 名），命中即跳过字节嗅探。
+ * 用于 percent：其首块开头就是纯译文文本，无特征符可提前识别，只能依赖预设。
  * @returns {{ write: Function, getFormat: Function, getBuffer: Function }}
  */
-export function createRealtimeStreamParser() {
-  let format = null; // 判定的流格式："xml" | "json" | "line" | null
+export function createRealtimeStreamParser({
+  format: presetFormat = null,
+} = {}) {
+  // 判定的流格式："xml" | "json" | "line" | "percent" | null
+  // preset 名 textlines 与内部使用的 line 对齐，避免 switch 分支重复。
+  let format = presetFormat === "textlines" ? "line" : presetFormat;
   let buffer = "";
 
-  // 辅助判定流格式
+  // 辅助判定流格式（未显式传入 format 的旧调用路径兜底）
   const detect = (content) => {
     const stripped = content.trim();
     if (stripped.search(/[{[]/) !== -1) return "json";
     if (stripped.search(/<(t|item|seg)\s/i) !== -1) return "xml";
     if (stripped.search(/^\d+\s*\|/m) !== -1) return "line";
+    if (stripped.search(/\n%%\n/) !== -1) return "percent";
     return null;
   };
 
@@ -574,6 +600,31 @@ export function createRealtimeStreamParser() {
     return results;
   };
 
+  // 实时解析百分号分隔格式
+  const parsePercent = (content) => {
+    const results = [];
+    const blocks = content.split("\n%%\n");
+    const terminated = content.endsWith("\n%%\n");
+    const closedCount = terminated ? blocks.length : blocks.length - 1;
+    for (const [id, block] of blocks.slice(0, closedCount).entries()) {
+      const text = block.trim();
+      if (!text) continue;
+      results.push({ id, partialText: text, isComplete: true });
+    }
+    // 尚未被分隔符终结的最后一个块是“正在打字”的段落
+    if (!terminated && blocks.length > 0) {
+      const tail = blocks[blocks.length - 1].trim();
+      if (tail) {
+        results.push({
+          id: blocks.length - 1,
+          partialText: tail,
+          isComplete: false,
+        });
+      }
+    }
+    return results;
+  };
+
   return {
     write(delta) {
       buffer += delta;
@@ -587,8 +638,9 @@ export function createRealtimeStreamParser() {
           return parseXml(buffer);
         case "line":
           return parseLine(buffer);
+        case "percent":
+          return parsePercent(buffer);
         case "json":
-          return [];
         default:
           return [];
       }

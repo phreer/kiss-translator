@@ -4,11 +4,14 @@ import {
   DEFAULT_NOBATCH_PROMPT_SLUG,
   DEFAULT_SUBTITLE_PROMPT_SLUG,
   PRESET_PROMPTS,
+  PROMPT_CATEGORY_BATCH_SYSTEM,
   PROMPT_CATEGORY_DICTIONARY,
+  PROMPT_CATEGORY_USER,
   PROMPT_MODE_FOLLOW_API,
   PROMPT_MODE_GLOBAL,
   PROMPT_TEMPLATE_CATEGORIES,
   SETTINGS_VERSION_V2,
+  applyPromptTestOverrides,
   getDictionaryPromptOptions,
   getPromptDisplayName,
   migrateSettingPromptsToV2,
@@ -291,6 +294,8 @@ describe("prompt settings", () => {
       name: "Custom prompt",
       systemPrompt: "system",
       userPrompt: "user",
+      inputFormat: "",
+      outputFormat: "",
     });
   });
 
@@ -311,5 +316,155 @@ describe("prompt settings", () => {
         expect.objectContaining({ slug: DEFAULT_DICTIONARY_PROMPT_SLUG }),
       ])
     );
+  });
+
+  test("preset batch prompts bind fixed input/output formats", () => {
+    const batchPresets = PRESET_PROMPTS.filter(
+      (prompt) => prompt.category === "batch system prompt"
+    );
+    expect(batchPresets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: "batch-translation-json",
+          inputFormat: "json",
+          outputFormat: "json",
+        }),
+        expect.objectContaining({
+          slug: "batch-translation-xml",
+          inputFormat: "json",
+          outputFormat: "xml",
+        }),
+        expect.objectContaining({
+          slug: "batch-translation-line",
+          inputFormat: "json",
+          outputFormat: "textlines",
+        }),
+      ])
+    );
+  });
+
+  test("normalizePrompt carries input/output format fields", () => {
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        inputFormat: "percent",
+        outputFormat: "xml",
+      })
+    ).toMatchObject({
+      slug: "prompt_custom",
+      inputFormat: "percent",
+      outputFormat: "xml",
+    });
+    expect(normalizePrompt({}).inputFormat).toBe("");
+  });
+
+  test("resolveApiPromptSettings inlines the batch prompt format into the api setting", () => {
+    const api = {
+      apiSlug: "openai",
+      batchPromptSlug: "batch-translation-xml",
+    };
+    expect(resolveApiPromptSettings(api)).toMatchObject({
+      batchPromptSlug: "batch-translation-xml",
+      systemPrompt: defaultSystemPrompt,
+      ioInputFormat: "json",
+      ioOutputFormat: "xml",
+    });
+  });
+
+  test("resolveApiPromptSettings falls back to json format for prompts without format", () => {
+    const customPrompt = {
+      slug: "prompt_custom",
+      category: "batch system prompt",
+      name: "Custom batch",
+      systemPrompt: "Translate it.",
+    };
+    const api = resolveApiPromptSettings(
+      { apiSlug: "openai", batchPromptSlug: "prompt_custom" },
+      [customPrompt]
+    );
+    expect(api).toMatchObject({
+      batchPromptSlug: "prompt_custom",
+      systemPrompt: "Translate it.",
+      ioInputFormat: "json",
+      ioOutputFormat: "json",
+    });
+  });
+
+  test("normalizeCustomPrompts keeps custom prompt formats", () => {
+    const normalized = normalizeCustomPrompts([
+      {
+        slug: "prompt_custom",
+        category: "batch system prompt",
+        name: "Custom batch",
+        systemPrompt: "Translate it.",
+        userPrompt: "",
+        inputFormat: "percent",
+        outputFormat: "xml",
+      },
+    ]);
+    expect(normalized[0]).toMatchObject({
+      inputFormat: "percent",
+      outputFormat: "xml",
+    });
+  });
+});
+
+describe("applyPromptTestOverrides", () => {
+  test("batch prompt forces batch mode and inlines its format", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      systemPrompt: "Custom batch rules.",
+      inputFormat: "percent",
+      outputFormat: "xml",
+    };
+    expect(
+      applyPromptTestOverrides({ useBatchFetch: false }, prompt)
+    ).toEqual({
+      useBatchFetch: true,
+      systemPrompt: "Custom batch rules.",
+      ioInputFormat: "percent",
+      ioOutputFormat: "xml",
+    });
+  });
+
+  test("batch prompt falls back to json/json for empty formats", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      systemPrompt: "Rules.",
+      inputFormat: "",
+      outputFormat: "",
+    };
+    expect(applyPromptTestOverrides({}, prompt)).toEqual({
+      useBatchFetch: true,
+      systemPrompt: "Rules.",
+      ioInputFormat: "json",
+      ioOutputFormat: "json",
+    });
+  });
+
+  test("user prompt forces non-batch mode and overrides nobatch fields", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_USER,
+      systemPrompt: "Custom nobatch.",
+      userPrompt: "Custom user.",
+    };
+    expect(
+      applyPromptTestOverrides({ useBatchFetch: true }, prompt)
+    ).toEqual({
+      useBatchFetch: false,
+      nobatchPrompt: "Custom nobatch.",
+      nobatchUserPrompt: "Custom user.",
+    });
+  });
+
+  test("other categories pass through unchanged without mutating the input", () => {
+    const api = { useBatchFetch: true, apiSlug: "openai" };
+    const prompt = {
+      category: PROMPT_CATEGORY_DICTIONARY,
+      systemPrompt: "Dict.",
+    };
+    const result = applyPromptTestOverrides(api, prompt);
+    expect(result).toEqual(api);
+    expect(result).not.toBe(api);
   });
 });

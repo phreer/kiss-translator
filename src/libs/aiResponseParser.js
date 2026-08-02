@@ -214,3 +214,262 @@ export const parseCompleteTranslationSegments = (
 
   return parseLineTranslationSegments(content, { decodeText });
 };
+
+/**
+ * 从百分号分隔的字符串中解析聚合翻译片段。
+ *
+ * 与 percent 编码模板同构：每个块为一段译文文本，块之间以 `%%` 分隔。
+ * 映射方式为 by_order：按出现顺序编号，不依赖 sortSegments 的 id 排序。
+ *
+ * @param {string} content 完整或累积中的模型输出
+ * @param {Object} options 解析选项
+ * @param {Function} options.decodeText 译文文本解码函数
+ * @returns {Array<{id: number, translation: [string, string]}>} 解析出的段落列表
+ */
+export const parsePercentTranslationSegments = (
+  content,
+  { decodeText = identity } = {}
+) => {
+  const segments = [];
+  const blocks = String(content || "").split("\n%%\n");
+
+  for (const [id, block] of blocks.entries()) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+
+    const rawText = trimmed;
+
+    segments.push({
+      id,
+      translation: [decodeText(rawText.trim()), ""],
+    });
+  }
+
+  return segments;
+};
+
+// render 函数是各 parse 函数的逆操作，输出格式与对应解析器严格同构，
+// 供系统提示词中的 Output example 自动生成使用，保证示例与解析逻辑永不漂移。
+// 入参兼容 `{ id, translation: [text, source] }` 与 `{ id, translation, source_language }` 两种形态。
+const rowText = (seg) =>
+  Array.isArray(seg.translation)
+    ? String(seg.translation[0] ?? "")
+    : String(seg.translation ?? "");
+const rowSource = (seg) =>
+  Array.isArray(seg.translation)
+    ? String(seg.translation[1] ?? "")
+    : String(seg.source_language ?? seg.sourceLanguage ?? "");
+
+/**
+ * 将段落列表渲染为 JSON 聚合输出（`parseJsonTranslationSegments` 的逆操作）。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseJsonTranslationSegments` 解析的 JSON 文本
+ */
+export const renderJsonOutput = (segments) =>
+  JSON.stringify({
+    translations: segments.map((seg) => ({
+      id: seg.id,
+      text: rowText(seg),
+      sourceLanguage: rowSource(seg),
+    })),
+  });
+
+/**
+ * 将段落列表渲染为 XML 聚合输出（`parseXmlTranslationSegments` 的逆操作）。
+ * 译文内部换行直接保留：换行不是 XML 的结构字符，无需用 `<br>` 表达，
+ * 与 textlines（行结构会被换行破坏）的编码需求不同。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseXmlTranslationSegments` 解析的 XML 文本
+ */
+export const renderXmlOutput = (segments) =>
+  [
+    "<root>",
+    ...segments.map(
+      (seg) =>
+        `    <t id="${seg.id}" sourceLanguage="${xmlCodec.normalize(
+          rowSource(seg)
+        )}">${xmlCodec.normalize(rowText(seg))}</t>`
+    ),
+    "</root>",
+  ].join("\n");
+
+/**
+ * 将段落列表渲染为行协议输出（`parseLineTranslationSegments` 的逆操作）。
+ * 译文内部换行以 `<br>` 表达，避免破坏 `id | text` 行结构。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseLineTranslationSegments` 解析的行协议文本
+ */
+export const renderLineOutput = (segments) =>
+  segments
+    .map(
+      (seg) =>
+        `${seg.id} | ${textlinesCodec
+          .normalize(rowText(seg))
+          .replace(/\n/g, "<br>")}`
+    )
+    .join("\n");
+
+/**
+ * 将段落列表渲染为百分号分隔输出（`parsePercentTranslationSegments` 的逆操作）。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parsePercentTranslationSegments` 解析的文本
+ */
+export const renderPercentOutput = (segments) =>
+  segments
+    .map((seg) => `${percentCodec.normalize(rowText(seg))}`)
+    .join("\n\n%%\n\n");
+
+/**
+ * 创建转义编解码器。
+ *
+ * normalize 依 `escapes` 顺序逐条全局替换：`&`/`\` 等基础符号必须先转，再转结构标记，
+ * 使模型输出中不可能出现与输出格式结构字符（`<t>`、`%%`、`digits |` 等）冲突的字面内容。
+ * denormalize 是单趟逆映射：若分两次 replaceAll，`&amp;lt;` 会被逐步误还原成 `<`，
+ * 单趟正则则能在一次扫描内把 `&amp;lt;` 还原成 `&lt;`。换行标记（`\n`→`<br>`）由各
+ * parse 函数自己还原，不进入 denormalize，避免把译文里保字面的 `<br>` 误还原成换行。
+ *
+ * 每个转义项为 `[from, to, reverseTo]`：
+ * - from 为字符串或带 g 标志的正则，用于 normalize 的匹配；
+ * - to 为 normalize 的替换文本，也是 denormalize 要匹配的文本；
+ * - reverseTo 是可选的 denormalize 还原文本，from 为正则时必须提供
+ *   （例如 `<br/>` 归一为规范形 `<br>`）。
+ *
+ * @param {Array<[string|RegExp, string, string?]>} escapes 有序转义项
+ * @returns {{normalize: Function, denormalize: Function, promptNote: string}}
+ */
+export const createEscapeCodec = (escapes = []) => {
+  const normalize = (value) => {
+    let text = String(value ?? "");
+    for (const [from, to] of escapes) {
+      text =
+        typeof from === "string"
+          ? text.replaceAll(from, to)
+          : text.replace(from, to);
+    }
+    return text;
+  };
+
+  const reverse = new Map();
+  for (const [from, to, reverseTo] of escapes) {
+    if (from === "\n") continue;
+    const back = reverseTo ?? (typeof from === "string" ? from : "");
+    if (back) reverse.set(to, back);
+  }
+
+  const reversePattern =
+    reverse.size > 0
+      ? new RegExp(
+          [...reverse.keys()]
+            .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("|"),
+          "g"
+        )
+      : null;
+
+  const denormalize = (value) => {
+    const text = String(value ?? "");
+    return reversePattern
+      ? text.replace(reversePattern, (match) => reverse.get(match))
+      : text;
+  };
+
+  return { normalize, denormalize };
+};
+
+// 各格式的转义表与提示备注。实体集刻意取最小：`&quot;`/`&apos;` 只影响属性，
+// 文本内容不需要转，减少噪声与保真风险。
+const xmlCodec = createEscapeCodec(
+  [
+    ["&", "&amp;"],
+    ["<", "&lt;"],
+    [">", "&gt;"],
+  ],
+);
+
+const textlinesCodec = createEscapeCodec(
+  [
+    ["&", "&amp;"],
+    [/<br\s*\/?>/gi, "&lt;br&gt;", "<br>"],
+    ["\n", "<br>"],
+  ],
+);
+
+const percentCodec = createEscapeCodec(
+  [
+    ["\\", "\\\\"],
+    ["%", "\\%"],
+  ],
+);
+
+const jsonOutputFormatNote =
+`Output a single raw JSON object only. No extra text or fences.
+Keep id, order, and count of segments.
+Detect sourceLanguage for each segment.
+Fail-safe: On any error, return {"translations":[]}.`;
+
+const xmlOutputFormatNote =
+`Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
+Maintain the exact "id" from the input in the "id" attribute. Detect the source language for the "sourceLanguage" attribute.
+Output ONLY the <root> element and its children. Do not include "xml" version declarations or markdown code blocks.
+Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively.`;
+
+const textlinesOutputFormatNote =
+`Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
+Output exactly one line per segment using the format: "{id} | {translated_text}".
+On error, return empty text.
+You MUST copy the exact "id" from the input segment to the output line.
+Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;.`;
+
+const percentOuputFormatNote =
+`Write a literal % as \\% and a literal backslash as \\\\.
+Preserve the order of segments as they appear in the input.`;
+
+/**
+ * 预置解析器注册表：每个格式同时携带解析函数、对应的输出渲染函数与转义编解码器，
+ * 供 decoder 解析与 Output example 自动生成共用，是 Step 3/5 的统一入口。
+ */
+export const parserPresets = {
+  json: {
+    name: "json",
+    mappingMode: "by_id",
+    parse: parseJsonTranslationSegments,
+    render: renderJsonOutput,
+    normalize: identity,
+    denormalize: identity,
+    promptNote: jsonOutputFormatNote,
+  },
+  xml: {
+    name: "xml",
+    mappingMode: "by_id",
+    parse: parseXmlTranslationSegments,
+    render: renderXmlOutput,
+    normalize: xmlCodec.normalize,
+    denormalize: xmlCodec.denormalize,
+    promptNote: xmlOutputFormatNote,
+  },
+  textlines: {
+    name: "textlines",
+    mappingMode: "by_id",
+    parse: parseLineTranslationSegments,
+    render: renderLineOutput,
+    normalize: textlinesCodec.normalize,
+    denormalize: textlinesCodec.denormalize,
+    promptNote: textlinesOutputFormatNote,
+  },
+  percent: {
+    name: "percent",
+    mappingMode: "by_order",
+    parse: parsePercentTranslationSegments,
+    render: renderPercentOutput,
+    normalize: percentCodec.normalize,
+    denormalize: percentCodec.denormalize,
+    promptNote: percentOuputFormatNote,
+  },
+};
+
+/**
+ * 按名称获取解析器 preset，未知名称回落到 json（与自动探测的默认行为一致）。
+ * @param {string} name preset 名称
+ * @returns {Object} 解析器 preset 对象
+ */
+export const getParserPreset = (name) => parserPresets[name] || parserPresets.json;

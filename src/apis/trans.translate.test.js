@@ -274,6 +274,283 @@ describe("handleTranslate", () => {
     expect(fetchData).not.toHaveBeenCalled();
   });
 
+  test("streams XML batch results incrementally", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({
+        choices: [{ delta: { content: '<root><t id="0">你好</t>' } }],
+      });
+      yield JSON.stringify({
+        choices: [{ delta: { content: '<t id="1">世界</t></root>' } }],
+      });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["hello", "world"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "xml",
+          streamRenderMode: "disabled",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, result: ["你好", ""] },
+      { id: 1, result: ["世界", ""] },
+    ]);
+  });
+
+  test("streams textlines batch results incrementally", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({ choices: [{ delta: { content: "0 | 你好\n" } }] });
+      yield JSON.stringify({
+        choices: [{ delta: { content: "1 | 世界\n" } }],
+      });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["hello", "world"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "textlines",
+          streamRenderMode: "disabled",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, result: ["你好", ""] },
+      { id: 1, result: ["世界", ""] },
+    ]);
+  });
+
+  test("streams percent batch results incrementally and completes tail via fallback", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({ choices: [{ delta: { content: "第一段" } }] });
+      yield JSON.stringify({
+        choices: [{ delta: { content: "\n\n%%\n\n第二段" } }],
+      });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["a", "b"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "percent",
+          streamRenderMode: "disabled",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, result: ["第一段", ""] },
+      { id: 1, result: ["第二段", ""] },
+    ]);
+  });
+
+  test("streams percent typewriter partials in realtime mode", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({ choices: [{ delta: { content: "第一" } }] });
+      yield JSON.stringify({ choices: [{ delta: { content: "段" } }] });
+      yield JSON.stringify({
+        choices: [{ delta: { content: "\n\n%%\n\n第二" } }],
+      });
+      yield JSON.stringify({ choices: [{ delta: { content: "段" } }] });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["a", "b"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "percent",
+          streamRenderMode: "realtime",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, partialText: "第一", isComplete: false },
+      { id: 0, partialText: "第一段", isComplete: false },
+      { id: 0, result: ["第一段", ""] },
+      { id: 1, partialText: "第二", isComplete: false },
+      { id: 1, partialText: "第二段", isComplete: false },
+      { id: 1, result: ["第二段", ""] },
+    ]);
+  });
+
+  test("decodes escaped percent partials in realtime mode", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({ choices: [{ delta: { content: "50\\%" } }] });
+      yield JSON.stringify({
+        choices: [{ delta: { content: " off\n\n%%\n\n80\\%" } }],
+      });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["a", "b"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "percent",
+          streamRenderMode: "realtime",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, partialText: "50%", isComplete: false },
+      { id: 0, result: ["50% off", ""] },
+      { id: 1, partialText: "80%", isComplete: false },
+      { id: 1, result: ["80%", ""] },
+    ]);
+  });
+
+  test("decodes percent escapes when partial char arrives one at a time", async () => {
+    const frames = [
+      "5",
+      "0",
+      "\\",
+      "%",
+      " ",
+      "o",
+      "f",
+      "f",
+      "\n\n%%\n\n",
+      "8",
+      "0",
+      "\\",
+      "%",
+      " ",
+      "o",
+      "f",
+      "f",
+    ];
+    async function* streamChunks() {
+      for (const ch of frames) {
+        yield JSON.stringify({ choices: [{ delta: { content: ch } }] });
+      }
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["a", "b"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "percent",
+          streamRenderMode: "realtime",
+        },
+        usePool: false,
+      })
+    );
+
+    // percent 语义：模型输出 50\% 表示字面量 50%。
+    // 逐字符到达时，每个 partial 都从原始缓冲重新解码：\ 单独到达时会短暂显示，
+    // % 到达后\ 与 % 组成完整转义并还原，最终 partial 不含残留的 \%。
+    const partials = result.filter((item) => item.isComplete === false);
+    expect(partials.length).toBeGreaterThan(0);
+    for (const item of partials) {
+      expect(item.partialText).not.toContain("\\%");
+    }
+    expect(result).toContainEqual({
+      id: 1,
+      partialText: "80% off",
+      isComplete: false,
+    });
+    expect(result).toContainEqual({ id: 0, result: ["50% off", ""] });
+    expect(result).toContainEqual({ id: 1, result: ["80% off", ""] });
+  });
+
+  test("decodes XML-escaped partials in realtime mode", async () => {
+    async function* streamChunks() {
+      yield JSON.stringify({
+        choices: [{ delta: { content: '<t id="0">A &lt;b&gt;B' } }],
+      });
+      yield JSON.stringify({ choices: [{ delta: { content: "</t>" } }] });
+    }
+
+    fetchStream.mockReturnValueOnce(streamChunks());
+
+    const result = await collectAsyncGenerator(
+      handleTranslate(["a"], {
+        from: "en",
+        to: "zh-CN",
+        fromLang: "English",
+        toLang: "Chinese",
+        langMap: () => "",
+        glossary: "",
+        apiSetting: {
+          ...getApiSetting(OPT_TRANS_OPENAI),
+          ioInputFormat: "json",
+          ioOutputFormat: "xml",
+          streamRenderMode: "realtime",
+        },
+        usePool: false,
+      })
+    );
+
+    expect(result).toEqual([
+      { id: 0, partialText: "A <b>B", isComplete: false },
+      { id: 0, result: ["A <b>B", ""] },
+    ]);
+  });
+
   test("streams non-batch plain text when batch fetch is disabled", async () => {
     async function* streamChunks() {
       yield JSON.stringify({ choices: [{ delta: { content: "你" } }] });
