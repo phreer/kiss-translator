@@ -614,10 +614,6 @@ Rules:
 7.  Detect sourceLanguage for each segment.
 8.  Return empty or unchanged inputs as is.
 
-Example:
-Input: {"targetLanguage":"zh-CN","segments":[{"id":1,"text":"A <b>React</b> component."}],"glossary":{"component":"组件","React":""}}
-Output: {"translations":[{"id":1,"text":"一个<b>React</b>组件","sourceLanguage":"en"}]}
-
 Fail-safe: On any error, return {"translations":[]}.`;
 
 export const defaultSystemPromptXml = `Act as a translation API. Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
@@ -638,16 +634,7 @@ Rules:
 4.  **Glossary**: Highest priority. Use the glossary value for translation. If the value is "", keep the source term as is.
 5.  **Do Not Translate**: Content inside <code>, <pre>, text in backticks ("code"), and placeholders like {1}, {{1}}, [1], [[1]].
 6.  **Context**: Use the "title" and "description" fields to understand the context for better translation accuracy, but do not output them.
-7.  **Tone**: Apply the specified "tone" (formal/casual).
-
-Example:
-Input:
-{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello <b>World</b>!"}],"glossary":{"World":"世界"},"tone":"formal"}
-
-Output:
-<root>
-    <t id="0" sourceLanguage="en">你好 <b>世界</b>！</t>
-</root>`;
+7.  **Tone**: Apply the specified "tone" (formal/casual).`;
 
 export const defaultSystemPromptLines = `Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
 
@@ -669,12 +656,6 @@ Rules:
 7.  **Glossary**: Highest priority. Follow 'glossary'. Use value for translation; if value is "", keep the key.
 8.  **Do Not Translate**: content in <code>, <pre>, text enclosed in backticks, or placeholders like {1}, {{1}}, [1].
 9.  **Tone**: Apply the specified tone.
-
-Example:
-Input: {"targetLanguage":"zh-CN","segments":[{"id":0,"text":"Hello."},{"id":1,"text":"Line 1\nLine 2"}],"glossary":{}}
-Output:
-0 | 你好。
-1 | 第一行<br>第二行
 
 Fail-safe: On error, return "{id} | {original_text}" line by line.`;
 

@@ -136,6 +136,46 @@ const genSystemPrompt = ({
 const JSON_INPUT_TEMPLATE =
   '{"targetLanguage":{{to_lang|json}},"segments":[{% for seg in segments %}{"id":{{seg.id}},"text":{{seg.source_text|json}}}{% if not loop.last %},{% endif %}{% endfor %}]{% if title %},"title":{{title|json}}{% endif %}{% if description %},"description":{{description|json}}{% endif %}{% if has_glossary %},"glossary":{{glossary|json}}{% endif %}{% if tone %},"tone":{{tone|json}}{% endif %}}';
 
+// 统一示例上下文：与真实批量 user message 走同一模板渲染，保证格式逐字节同构。
+const EXAMPLE_TARGET_LANG = "zh-CN";
+const EXAMPLE_SEGMENTS = [
+  { id: 0, source_text: "A <b>React</b> component." },
+  { id: 1, source_text: "Line 1\nLine 2" },
+];
+const EXAMPLE_GLOSSARY = { component: "组件", React: "" };
+
+const EXAMPLE_OUTPUT_JSON =
+  '{"translations":[{"id":0,"text":"一个<b>React</b>组件","sourceLanguage":"en"},{"id":1,"text":"第一行\\n第二行","sourceLanguage":"en"}]}';
+const EXAMPLE_OUTPUT_XML =
+  '<root>\n    <t id="0" sourceLanguage="en">一个<b>React</b>组件</t>\n    <t id="1" sourceLanguage="en">第一行<br>第二行</t>\n</root>';
+const EXAMPLE_OUTPUT_LINE = "0 | 一个<b>React</b>组件\n1 | 第一行<br>第二行";
+
+const renderExampleInput = () =>
+  renderTemplate(JSON_INPUT_TEMPLATE, {
+    to_lang: EXAMPLE_TARGET_LANG,
+    title: "",
+    description: "",
+    glossary: EXAMPLE_GLOSSARY,
+    has_glossary: Object.keys(EXAMPLE_GLOSSARY).length !== 0,
+    tone: "",
+    segments: EXAMPLE_SEGMENTS,
+  });
+
+const detectBatchFormat = (systemPrompt) => {
+  if (/<root>/i.test(systemPrompt)) return "xml";
+  if (/ID\s*\|\s*Text/i.test(systemPrompt)) return "textlines";
+  return "json";
+};
+
+const buildBatchExample = (systemPrompt) => {
+  const outputByFormat = {
+    json: EXAMPLE_OUTPUT_JSON,
+    xml: EXAMPLE_OUTPUT_XML,
+    textlines: EXAMPLE_OUTPUT_LINE,
+  };
+  return `Example:\nInput: ${renderExampleInput()}\nOutput: ${outputByFormat[detectBatchFormat(systemPrompt)]}`;
+};
+
 const genUserPrompt = ({
   nobatchUserPrompt,
   useBatchFetch,
@@ -1073,7 +1113,10 @@ export const genTransReq = async ({ reqHook, ...args }) => {
           tone,
         });
 
-    args.systemPrompt = baseSystemPrompt;
+    args.systemPrompt =
+      useBatchFetch && !events
+        ? `${baseSystemPrompt}\n\n${buildBatchExample(baseSystemPrompt)}`
+        : baseSystemPrompt;
     args.userPrompt = events
       ? buildSubtitleUserPrompt({
           formattedEvents: usesIndexSubtitleInput(subtitlePrompt)
