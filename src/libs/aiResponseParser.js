@@ -214,3 +214,139 @@ export const parseCompleteTranslationSegments = (
 
   return parseLineTranslationSegments(content, { decodeText });
 };
+
+/**
+ * 从百分号分隔的字符串中解析聚合翻译片段。
+ *
+ * 与 percent 编码模板同构：每个片段由可选的 `[id]` 头加译文文本组成，块之间以 `%%` 分隔。
+ * 映射方式为 by_order：模型省略 `[id]` 头时按出现顺序编号，不依赖 sortSegments 的 id 排序。
+ *
+ * @param {string} content 完整或累积中的模型输出
+ * @param {Object} options 解析选项
+ * @param {Function} options.decodeText 译文文本解码函数
+ * @returns {Array<{id: number, translation: [string, string]}>} 解析出的段落列表
+ */
+export const parsePercentTranslationSegments = (
+  content,
+  { decodeText = identity } = {}
+) => {
+  const segments = [];
+  const blocks = String(content || "").split(/\s*%%\s*/);
+
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+
+    const headerMatch = trimmed.match(/^\[(\d+)\]\s*[\r\n]+([\s\S]*)$/);
+    const id = headerMatch ? Number(headerMatch[1]) : segments.length;
+    const rawText = headerMatch ? headerMatch[2] : trimmed;
+
+    segments.push({
+      id,
+      translation: [decodeText(rawText.trim()), ""],
+    });
+  }
+
+  return segments;
+};
+
+// render 函数是各 parse 函数的逆操作，输出格式与对应解析器严格同构，
+// 供系统提示词中的 Output example 自动生成使用，保证示例与解析逻辑永不漂移。
+// 入参兼容 `{ id, translation: [text, source] }` 与 `{ id, translation, source_language }` 两种形态。
+const rowText = (seg) =>
+  Array.isArray(seg.translation)
+    ? String(seg.translation[0] ?? "")
+    : String(seg.translation ?? "");
+const rowSource = (seg) =>
+  Array.isArray(seg.translation)
+    ? String(seg.translation[1] ?? "")
+    : String(seg.source_language ?? seg.sourceLanguage ?? "");
+
+/**
+ * 将段落列表渲染为 JSON 聚合输出（`parseJsonTranslationSegments` 的逆操作）。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseJsonTranslationSegments` 解析的 JSON 文本
+ */
+export const renderJsonOutput = (segments) =>
+  JSON.stringify({
+    translations: segments.map((seg) => ({
+      id: seg.id,
+      text: rowText(seg),
+      sourceLanguage: rowSource(seg),
+    })),
+  });
+
+/**
+ * 将段落列表渲染为 XML 聚合输出（`parseXmlTranslationSegments` 的逆操作）。
+ * 译文内部换行以 `<br>` 表达，与 XML 解析器保留内部标签的约定一致。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseXmlTranslationSegments` 解析的 XML 文本
+ */
+export const renderXmlOutput = (segments) =>
+  [
+    "<root>",
+    ...segments.map(
+      (seg) =>
+        `    <t id="${seg.id}" sourceLanguage="${rowSource(seg)}">${rowText(
+          seg
+        ).replace(/\n/g, "<br>")}</t>`
+    ),
+    "</root>",
+  ].join("\n");
+
+/**
+ * 将段落列表渲染为行协议输出（`parseLineTranslationSegments` 的逆操作）。
+ * 译文内部换行以 `<br>` 表达，避免破坏 `id | text` 行结构。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parseLineTranslationSegments` 解析的行协议文本
+ */
+export const renderLineOutput = (segments) =>
+  segments
+    .map((seg) => `${seg.id} | ${rowText(seg).replace(/\n/g, "<br>")}`)
+    .join("\n");
+
+/**
+ * 将段落列表渲染为百分号分隔输出（`parsePercentTranslationSegments` 的逆操作）。
+ * @param {Array<{id: number, translation: [string, string]}>} segments 段落列表
+ * @returns {string} 可直接被 `parsePercentTranslationSegments` 解析的文本
+ */
+export const renderPercentOutput = (segments) =>
+  segments.map((seg) => `[${seg.id}]\n${rowText(seg)}`).join("\n%%\n\n");
+
+/**
+ * 预置解析器注册表：每个格式同时携带解析函数与对应的输出渲染函数，
+ * 供 decoder 解析与 Output example 自动生成共用，是 Step 3/5 的统一入口。
+ */
+export const parserPresets = {
+  json: {
+    name: "json",
+    mappingMode: "by_id",
+    parse: parseJsonTranslationSegments,
+    render: renderJsonOutput,
+  },
+  xml: {
+    name: "xml",
+    mappingMode: "by_id",
+    parse: parseXmlTranslationSegments,
+    render: renderXmlOutput,
+  },
+  textlines: {
+    name: "textlines",
+    mappingMode: "by_id",
+    parse: parseLineTranslationSegments,
+    render: renderLineOutput,
+  },
+  percent: {
+    name: "percent",
+    mappingMode: "by_order",
+    parse: parsePercentTranslationSegments,
+    render: renderPercentOutput,
+  },
+};
+
+/**
+ * 按名称获取解析器 preset，未知名称回落到 json（与自动探测的默认行为一致）。
+ * @param {string} name preset 名称
+ * @returns {Object} 解析器 preset 对象
+ */
+export const getParserPreset = (name) => parserPresets[name] || parserPresets.json;

@@ -61,7 +61,10 @@ import {
   parseAITerms,
 } from "../libs/utils";
 import { decodeHTMLEntities } from "../libs/html";
-import { parseCompleteTranslationSegments } from "../libs/aiResponseParser";
+import {
+  parseCompleteTranslationSegments,
+  getParserPreset,
+} from "../libs/aiResponseParser";
 import { renderTemplate } from "../libs/template";
 import {
   parseStreamingSegments,
@@ -144,11 +147,12 @@ const EXAMPLE_SEGMENTS = [
 ];
 const EXAMPLE_GLOSSARY = { component: "组件", React: "" };
 
-const EXAMPLE_OUTPUT_JSON =
-  '{"translations":[{"id":0,"text":"一个<b>React</b>组件","sourceLanguage":"en"},{"id":1,"text":"第一行\\n第二行","sourceLanguage":"en"}]}';
-const EXAMPLE_OUTPUT_XML =
-  '<root>\n    <t id="0" sourceLanguage="en">一个<b>React</b>组件</t>\n    <t id="1" sourceLanguage="en">第一行<br>第二行</t>\n</root>';
-const EXAMPLE_OUTPUT_LINE = "0 | 一个<b>React</b>组件\n1 | 第一行<br>第二行";
+// 与 renderExampleInput 的 EXAMPLE_SEGMENTS 一一对应的示例译文，
+// 由 parser preset 的 render 逆操作生成 Output example，保证与解析逻辑同构。
+const SAMPLE_TRANSLATIONS = [
+  { id: 0, translation: ["一个<b>React</b>组件", "en"] },
+  { id: 1, translation: ["第一行\n第二行", "en"] },
+];
 
 const renderExampleInput = () =>
   renderTemplate(JSON_INPUT_TEMPLATE, {
@@ -168,12 +172,8 @@ const detectBatchFormat = (systemPrompt) => {
 };
 
 const buildBatchExample = (systemPrompt) => {
-  const outputByFormat = {
-    json: EXAMPLE_OUTPUT_JSON,
-    xml: EXAMPLE_OUTPUT_XML,
-    textlines: EXAMPLE_OUTPUT_LINE,
-  };
-  return `Example:\nInput: ${renderExampleInput()}\nOutput: ${outputByFormat[detectBatchFormat(systemPrompt)]}`;
+  const parser = getParserPreset(detectBatchFormat(systemPrompt));
+  return `Example:\nInput: ${renderExampleInput()}\nOutput: ${parser.render(SAMPLE_TRANSLATIONS)}`;
 };
 
 const genUserPrompt = ({
