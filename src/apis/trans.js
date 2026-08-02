@@ -62,6 +62,7 @@ import {
 } from "../libs/utils";
 import { decodeHTMLEntities } from "../libs/html";
 import { parseCompleteTranslationSegments } from "../libs/aiResponseParser";
+import { renderTemplate } from "../libs/template";
 import {
   parseStreamingSegments,
   createStreamingJsonParser,
@@ -130,6 +131,11 @@ const genSystemPrompt = ({
     .replaceAll(INPUT_PLACE_TO_LANG, toLang)
     .replaceAll(INPUT_PLACE_TEXT, texts[0]);
 
+// 批量翻译输入模板：与上游硬编码的 JSON 结构保持逐字节一致。
+// 单行书写以消除模板空白，`|json` 过滤器沿用 JSON.stringify 的转义语义。
+const JSON_INPUT_TEMPLATE =
+  '{"targetLanguage":{{to_lang|json}},"segments":[{% for seg in segments %}{"id":{{seg.id}},"text":{{seg.source_text|json}}}{% if not loop.last %},{% endif %}{% endfor %}]{% if title %},"title":{{title|json}}{% endif %}{% if description %},"description":{{description|json}}{% endif %}{% if has_glossary %},"glossary":{{glossary|json}}{% endif %}{% if tone %},"tone":{{tone|json}}{% endif %}}';
+
 const genUserPrompt = ({
   nobatchUserPrompt,
   useBatchFetch,
@@ -150,18 +156,16 @@ const genUserPrompt = ({
   }
 
   if (useBatchFetch) {
-    const promptObj = {
-      targetLanguage: toLang,
-      segments: texts.map((text, i) => ({ id: i, text })),
-    };
-
-    title && (promptObj.title = title);
-    description && (promptObj.description = description);
-
-    Object.keys(glossary).length !== 0 && (promptObj.glossary = glossary);
-    tone && (promptObj.tone = tone);
-
-    return JSON.stringify(promptObj);
+    return renderTemplate(JSON_INPUT_TEMPLATE, {
+      to_lang: toLang,
+      title,
+      description,
+      glossary,
+      // 空对象在 JS 中为真值，需显式计算条件，与上游 Object.keys().length !== 0 保持一致。
+      has_glossary: Object.keys(glossary).length !== 0,
+      tone,
+      segments: texts.map((text, i) => ({ id: i, source_text: text })),
+    });
   }
 
   const glossaryStr = Object.entries(glossary)
