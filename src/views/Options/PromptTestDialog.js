@@ -15,7 +15,7 @@ import Typography from "@mui/material/Typography";
 import LoadingButton from "@mui/lab/LoadingButton";
 import Alert from "@mui/material/Alert";
 import { useI18n } from "../../hooks/I18n";
-import { resolveApiPromptSettings } from "../../config/prompt";
+import { resolveApiPromptSettings, applyPromptTestOverrides } from "../../config/prompt";
 import { OPT_LANGS_LIST } from "../../config/api";
 import { testTranslate } from "../../apis/testTranslate";
 import { getTestCasesByCategory, getTestTexts } from "../../config/promptTestCases";
@@ -98,20 +98,15 @@ export default function PromptTestDialog({
         throw new Error("No test case selected");
       }
 
-      // 解析 prompt 到 API 配置
-      const resolvedApi = resolveApiPromptSettings(
-        { ...selectedApi },
-        prompts,
-        subtitleSetting
+      // 解析 prompt 到 API 配置，并把被测试提示词（含批量格式）覆盖到副本上
+      const resolvedApi = applyPromptTestOverrides(
+        resolveApiPromptSettings(
+          { ...selectedApi },
+          prompts,
+          subtitleSetting
+        ),
+        prompt
       );
-
-      // 根据 prompt category 覆盖对应的 prompt 字段
-      if (prompt.category === "batch system prompt") {
-        resolvedApi.systemPrompt = prompt.systemPrompt;
-      } else if (prompt.category === "user prompt") {
-        resolvedApi.nobatchPrompt = prompt.systemPrompt;
-        resolvedApi.nobatchUserPrompt = prompt.userPrompt;
-      }
 
       const testResult = await testTranslate({
         apiSetting: resolvedApi,

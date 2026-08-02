@@ -16,6 +16,7 @@ import SaveIcon from "@mui/icons-material/Save";
 import TextSnippetIcon from "@mui/icons-material/TextSnippet";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Grid from "@mui/material/Grid";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
@@ -53,6 +54,7 @@ import { useApiList } from "../../hooks/Api";
 import { useSetting } from "../../hooks/Setting";
 import CodeField from "./CodeField";
 import PromptTestDialog from "./PromptTestDialog";
+import { renderBatchExample } from "../../apis/trans";
 
 const TRANSLATION_PROMPT_PLACEHOLDERS = [
   INPUT_PLACE_TEXT,
@@ -214,6 +216,24 @@ function PromptFields({
     [formData, isPreset, prompt]
   );
 
+  // 批处理系统提示词在请求时自动追加的示例：按所选输入/输出格式实时渲染。
+  const batchExample = useMemo(
+    () =>
+      formData.category === PROMPT_CATEGORY_BATCH_SYSTEM
+        ? renderBatchExample(
+            formData.inputFormat || "json",
+            formData.outputFormat || "json",
+            formData.inputTemplate
+          )
+        : "",
+    [
+      formData.category,
+      formData.inputFormat,
+      formData.outputFormat,
+      formData.inputTemplate,
+    ]
+  );
+
   const handleChange = (event) => {
     const { name, value } = event.target;
     setFormData((prev) => ({
@@ -306,6 +326,87 @@ function PromptFields({
           />
         )}
       </Stack>
+
+      {/* 自动渲染的示例：请求时追加到系统提示词，内容不可编辑。 */}
+      {formData.category === PROMPT_CATEGORY_BATCH_SYSTEM && (
+        <Stack spacing={1}>
+          <CodeField
+            size="small"
+            label={i18n("batch_auto_example", "自动渲染的示例（请求时自动追加）")}
+            value={batchExample}
+            InputProps={{ readOnly: true }}
+            minRows={3}
+            maxRows={14}
+          />
+          <Typography variant="caption" color="text.secondary">
+            {i18n(
+              "batch_auto_example_helper",
+              "此部分由所选输入/输出格式自动渲染，发送请求时自动追加到系统提示词，不可编辑"
+            )}
+          </Typography>
+        </Stack>
+      )}
+
+      {/* 聚合翻译输入/输出格式：自定义聚合提示词可自由设置，预定义提示词锁定为固定组合。 */}
+      {formData.category === PROMPT_CATEGORY_BATCH_SYSTEM && (
+        <Box>
+          <Grid container spacing={2} columns={12}>
+            <Grid item xs={12} sm={6} md={6} lg={3}>
+              <TextField
+                select
+                fullWidth
+                size="small"
+                name="inputFormat"
+                value={formData.inputFormat || "json"}
+                label={i18n("io_input_format", "输入格式")}
+                onChange={handleChange}
+                disabled={isPreset}
+              >
+                <MenuItem value="json">JSON</MenuItem>
+                <MenuItem value="percent">百分比分隔（%%）</MenuItem>
+                <MenuItem value="plaintext">纯文本</MenuItem>
+                <MenuItem value="custom">自定义模板</MenuItem>
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={6} lg={3}>
+              <TextField
+                select
+                fullWidth
+                size="small"
+                name="outputFormat"
+                value={formData.outputFormat || "json"}
+                label={i18n("io_output_format", "输出格式")}
+                onChange={handleChange}
+                disabled={isPreset}
+              >
+                <MenuItem value="json">JSON</MenuItem>
+                <MenuItem value="xml">XML</MenuItem>
+                <MenuItem value="textlines">逐行（id | text）</MenuItem>
+                <MenuItem value="percent">百分比分隔（%%）</MenuItem>
+              </TextField>
+            </Grid>
+            {formData.inputFormat === "custom" && (
+              <Grid item xs={12} sm={12} md={12} lg={6}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  multiline
+                  minRows={2}
+                  name="inputTemplate"
+                  value={formData.inputTemplate}
+                  label={i18n("io_input_template", "自定义输入模板")}
+                  onChange={handleChange}
+                  disabled={isPreset}
+                  helperText={i18n(
+                    "io_input_template_helper",
+                    "使用模板引擎语法，如 {{to_lang}} / {% for seg in segments %}，留空回退 JSON 模板"
+                  )}
+                />
+              </Grid>
+            )}
+          </Grid>
+        </Box>
+      )}
 
       {showUserPrompt && (
         <Stack spacing={1}>

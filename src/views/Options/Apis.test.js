@@ -276,6 +276,36 @@ describe("Apis model list", () => {
   });
 });
 
+describe("Apis io format", () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  test("does not render standalone ioPreset controls anymore", async () => {
+    const view = await renderApis(createApi({ useBatchFetch: true }));
+    expect(() => getInput(view.container, "ioPreset")).toThrow(
+      "Unable to find input named ioPreset"
+    );
+    expect(() => getInput(view.container, "llmInputFormat")).toThrow(
+      "Unable to find input named llmInputFormat"
+    );
+    expect(() => getInput(view.container, "llmOutputFormat")).toThrow(
+      "Unable to find input named llmOutputFormat"
+    );
+    expect(view.container.textContent).not.toContain("输入输出协议");
+
+    view.unmount();
+  });
+
+  test("batch prompt select hints that the format follows the selected prompt", async () => {
+    const view = await renderApis(createApi({ useBatchFetch: true }));
+    expect(view.container.textContent).toContain("批量翻译输入/输出格式由所选提示词决定");
+
+    view.unmount();
+  });
+});
+
 describe("Apis batch concurrency", () => {
   afterEach(() => {
     jest.clearAllMocks();
