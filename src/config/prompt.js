@@ -2,8 +2,6 @@ import {
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
   defaultSystemPrompt,
-  defaultSystemPromptLines,
-  defaultSystemPromptXml,
   defaultDictPrompt,
   defaultDictUserPrompt,
   defaultSubtitlePrompt,
@@ -66,22 +64,28 @@ export const PRESET_PROMPTS = [
     name: "Batch translation (JSON)",
     systemPrompt: defaultSystemPrompt,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "json",
   },
   {
     slug: PROMPT_SLUG_BATCH_TRANSLATION_XML,
     category: PROMPT_CATEGORY_BATCH_SYSTEM,
     nameKey: "preset_prompt_batch_translation_xml",
     name: "Batch translation (XML)",
-    systemPrompt: defaultSystemPromptXml,
+    systemPrompt: defaultSystemPrompt,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "xml",
   },
   {
     slug: PROMPT_SLUG_BATCH_TRANSLATION_LINE,
     category: PROMPT_CATEGORY_BATCH_SYSTEM,
     nameKey: "preset_prompt_batch_translation_line",
     name: "Batch translation (LINE)",
-    systemPrompt: defaultSystemPromptLines,
+    systemPrompt: defaultSystemPrompt,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "textlines",
   },
   {
     slug: PROMPT_SLUG_SUBTITLE_SEGMENTATION,
@@ -110,6 +114,8 @@ const PROMPT_STORAGE_FIELDS = [
   "name",
   "systemPrompt",
   "userPrompt",
+  "inputFormat",
+  "outputFormat",
 ];
 
 /**
@@ -127,6 +133,8 @@ export function normalizePrompt(prompt = {}) {
     name: String(prompt.name || ""),
     systemPrompt: String(prompt.systemPrompt || ""),
     userPrompt: String(prompt.userPrompt || ""),
+    inputFormat: String(prompt.inputFormat || ""),
+    outputFormat: String(prompt.outputFormat || ""),
   };
 }
 
@@ -162,13 +170,25 @@ export function normalizeCustomPrompts(userPrompts = []) {
   return (Array.isArray(userPrompts) ? userPrompts : [])
     .map(normalizePrompt)
     .filter((prompt) => prompt.slug && !isPresetPromptSlug(prompt.slug))
-    .map(({ slug, category, name, systemPrompt, userPrompt }) => ({
-      slug,
-      category,
-      name,
-      systemPrompt,
-      userPrompt,
-    }));
+    .map(
+      ({
+        slug,
+        category,
+        name,
+        systemPrompt,
+        userPrompt,
+        inputFormat,
+        outputFormat,
+      }) => ({
+        slug,
+        category,
+        name,
+        systemPrompt,
+        userPrompt,
+        inputFormat,
+        outputFormat,
+      })
+    );
 }
 
 /**
@@ -835,6 +855,9 @@ export function resolveApiPromptSettings(
   if (batchPrompt && (hasBatchPromptReference || !hasBatchPromptInlineValue)) {
     nextApiSetting.batchPromptSlug = batchPrompt.slug;
     nextApiSetting.systemPrompt = batchPrompt.systemPrompt;
+    // 聚合输入/输出格式随所选批处理提示词内联，供 trans.js 直接使用，二者永不漂移。
+    nextApiSetting.ioInputFormat = batchPrompt.inputFormat || "json";
+    nextApiSetting.ioOutputFormat = batchPrompt.outputFormat || "json";
   }
 
   const hasNobatchPromptReference = hasPromptReferenceField(
@@ -925,6 +948,25 @@ export function resolveApiPromptSettings(
   }
 
   return nextApiSetting;
+}
+
+// 提示词测试（提示词管理页"测试"按钮）：把被测试提示词的配置应用到已解析的
+// API 配置副本上，并强制走与被测提示词匹配的批量/非批量路径，保证测试反映的是
+// "当前提示词"而非所选 API 的存储配置。批量提示词同时内联输入/输出格式，
+// 与 genTransReq 追加示例、响应解析共用同一份格式，避免格式漂移。
+export function applyPromptTestOverrides(resolvedApi = {}, prompt = {}) {
+  const next = { ...resolvedApi };
+  if (prompt.category === PROMPT_CATEGORY_BATCH_SYSTEM) {
+    next.useBatchFetch = true;
+    next.systemPrompt = prompt.systemPrompt;
+    next.ioInputFormat = prompt.inputFormat || "json";
+    next.ioOutputFormat = prompt.outputFormat || "json";
+  } else if (prompt.category === PROMPT_CATEGORY_USER) {
+    next.useBatchFetch = false;
+    next.nobatchPrompt = prompt.systemPrompt;
+    next.nobatchUserPrompt = prompt.userPrompt;
+  }
+  return next;
 }
 
 /**

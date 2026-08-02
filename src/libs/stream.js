@@ -166,24 +166,36 @@ export function getStreamDelta(json, apiType) {
   }
 }
 
+const identity = (value) => value;
+
 /**
  * 核心逻辑：从流式响应的文本中（随着大模型源源不断输出），即时抽取出已匹配完成的网页翻译段落。
- * 兼容两种非 JSON 序列化的极速传输协议：XML 包裹协议与“管道符+换行”行协议。
+ * 兼容两种非 JSON 序列化的极速传输协议：XML 包裹协议与"管道符+换行"行协议。
  * @param {string} content 当前累计接收到的流式文本
  * @param {Set<number>} processedIds 已处理并上屏的段落 ID 集合 (用于去重，防重复上屏)
+ * @param {Object} options 解析选项
+ * @param {Function} options.decodeText 译文文本解码函数，与 parseAIRes 一致的实体还原
  * @yields {{ id: number, translation: [string, string] }} 解析出的段落 ID、译文及语种
  */
-export function* parseStreamingSegments(content, processedIds) {
+export function* parseStreamingSegments(
+  content,
+  processedIds,
+  { decodeText = identity } = {}
+) {
   if (!content) return;
 
   // 1. 尝试解析 XML 格式：<t id="0" sourceLanguage="en">译文</t>
   // XML/LINE 的具体字符串解析规则与非流式共用，流式层只负责 processedIds 去重和增量 yield。
+  // 结构与 <br>→换行 折叠由各解析器完成，实体还原统一在这里做一次。
   const xmlSegments = parseXmlTranslationSegments(content);
   if (xmlSegments.length > 0) {
     for (const { id, translation } of xmlSegments) {
       if (!processedIds.has(id)) {
         processedIds.add(id);
-        yield { id, translation };
+        yield {
+          id,
+          translation: [decodeText(translation[0]), translation[1]],
+        };
       }
     }
     return;
@@ -196,7 +208,10 @@ export function* parseStreamingSegments(content, processedIds) {
   })) {
     if (!processedIds.has(id)) {
       processedIds.add(id);
-      yield { id, translation };
+      yield {
+        id,
+        translation: [decodeText(translation[0]), translation[1]],
+      };
     }
   }
 }

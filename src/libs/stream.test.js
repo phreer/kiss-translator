@@ -68,6 +68,41 @@ describe("parseStreamingSegments", () => {
 
     expect(result).toEqual([{ id: 0, translation: ["第一行\n第二行", ""] }]);
   });
+
+  test("applies decodeText uniformly to XML and LINE segments", () => {
+    const decodeText = (s) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    const xml = [
+      ...parseStreamingSegments(
+        '<root><t id="0">x &lt;b&gt;y</t></root>',
+        new Set(),
+        { decodeText }
+      ),
+    ];
+    expect(xml).toEqual([{ id: 0, translation: ["x <b>y", ""] }]);
+
+    const line = [
+      ...parseStreamingSegments(
+        "0 | 第一行<br>第二行\n1 | a &lt;b&gt; c\n",
+        new Set(),
+        { decodeText }
+      ),
+    ];
+    // <br> 折叠先于 decodeText，转义实体单趟还原。
+    expect(line).toEqual([
+      { id: 0, translation: ["第一行\n第二行", ""] },
+      { id: 1, translation: ["a <b> c", ""] },
+    ]);
+  });
+
+  test("defaults to identity decode so existing callers are unchanged", () => {
+    const result = [
+      ...parseStreamingSegments(
+        '<root><t id="0" sourceLanguage="en">你好</t></root>',
+        new Set()
+      ),
+    ];
+    expect(result).toEqual([{ id: 0, translation: ["你好", "en"] }]);
+  });
 });
 
 describe("createStreamingSubtitleParser", () => {

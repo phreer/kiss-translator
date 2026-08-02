@@ -227,3 +227,21 @@ export const render = (instructions, context = {}) =>
 
 export const renderTemplate = (source, context = {}) =>
   render(compileTemplate(source), context);
+
+/**
+ * 占位符替换辅助函数：把模板里的 `{{key}}` 逐一替换为对应值。
+ *
+ * 与 renderTemplate 不同，这里故意用字符串 replaceAll 而非模板引擎：
+ * 系统提示词是用户可配置的，可能包含游离的 `}}`/`{%`，模板引擎会 throw，
+ * 而占位符替换应完全容忍——只替换显式传入的字段，未提供的 `{{key}}` 保持原样。
+ *
+ * @param {string} template 包含 `{{key}}` 占位符的模板
+ * @param {Object} vars 占位符名（不含大括号）到值的映射
+ * @returns {string} 替换后的字符串
+ */
+export const applyPlaceholders = (template, vars = {}) =>
+  Object.entries(vars).reduce(
+    (out, [key, value]) =>
+      out.replaceAll(`{{${key}}}`, value == null ? "" : String(value)),
+    String(template ?? "")
+  );
