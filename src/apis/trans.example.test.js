@@ -15,7 +15,7 @@ jest.mock("../libs/docInfo", () => ({
   getDocInfo: () => ({}),
 }));
 
-import { genTransReq } from "./trans";
+import { genTransReq, parseTransRes } from "./trans";
 import {
   defaultSystemPrompt,
   defaultSystemPromptXml,
@@ -26,6 +26,18 @@ import {
 
 const EXAMPLE_INPUT =
   '{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"A <b>React</b> component."},{"id":1,"text":"Line 1\\nLine 2"}],"glossary":{"component":"组件","React":""}}';
+
+// XML/textlines 输出格式会对 source_text 做对应转义，示例输入逐字节镜像真实批量 user message。
+const EXAMPLE_INPUT_XML =
+  '{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"A &lt;b&gt;React&lt;/b&gt; component."},{"id":1,"text":"Line 1\\nLine 2"}],"glossary":{"component":"组件","React":""}}';
+
+const EXAMPLE_INPUT_LINE =
+  '{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"A <b>React</b> component."},{"id":1,"text":"Line 1<br>Line 2"}],"glossary":{"component":"组件","React":""}}';
+
+const XML_PROMPT_NOTE =
+  "Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively.";
+const LINES_PROMPT_NOTE =
+  "Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;.";
 
 const EXAMPLE_OUTPUT_JSON =
   '{"translations":[{"id":0,"text":"一个<b>React</b>组件","sourceLanguage":"en"},{"id":1,"text":"第一行\\n第二行","sourceLanguage":"en"}]}';
@@ -83,32 +95,49 @@ describe("batch system prompt example", () => {
     );
   });
 
-  test("XML prompt appends unified example with XML output", async () => {
+  test("XML prompt appends unified example with XML output and escape note", async () => {
     const content = await renderSystemPrompt({
       systemPrompt: defaultSystemPromptXml,
     });
     expect(content).toBe(
-      `${defaultSystemPromptXml}\n\nExample:\nInput: ${EXAMPLE_INPUT}\nOutput: ${EXAMPLE_OUTPUT_XML}`
+      `${defaultSystemPromptXml}\n\nExample:\nInput: ${EXAMPLE_INPUT_XML}\nOutput: ${EXAMPLE_OUTPUT_XML}\n${XML_PROMPT_NOTE}`
     );
   });
 
-  test("LINE prompt appends unified example with line output", async () => {
+  test("LINE prompt appends unified example with line output and escape note", async () => {
     const content = await renderSystemPrompt({
       systemPrompt: defaultSystemPromptLines,
     });
     expect(content).toBe(
-      `${defaultSystemPromptLines}\n\nExample:\nInput: ${EXAMPLE_INPUT}\nOutput: ${EXAMPLE_OUTPUT_LINE}`
+      `${defaultSystemPromptLines}\n\nExample:\nInput: ${EXAMPLE_INPUT_LINE}\nOutput: ${EXAMPLE_OUTPUT_LINE}\n${LINES_PROMPT_NOTE}`
     );
   });
 
-  test("all three formats share the same example input", async () => {
-    for (const systemPrompt of [
-      defaultSystemPrompt,
-      defaultSystemPromptXml,
-      defaultSystemPromptLines,
+  test("each format's example input is byte-identical to its own real user message", async () => {
+    for (const [systemPrompt, expectedInput] of [
+      [defaultSystemPrompt, EXAMPLE_INPUT],
+      [defaultSystemPromptXml, EXAMPLE_INPUT_XML],
+      [defaultSystemPromptLines, EXAMPLE_INPUT_LINE],
     ]) {
       const content = await renderSystemPrompt({ systemPrompt });
-      expect(content).toContain(`Example:\nInput: ${EXAMPLE_INPUT}`);
+      expect(content).toContain(`Example:\nInput: ${expectedInput}`);
+
+      const [, , userMsg] = await genTransReq({
+        apiType: OPT_TRANS_OPENAI,
+        url: "https://api.openai.com/v1/chat/completions",
+        key: "test-key",
+        model: "test-model",
+        systemPrompt,
+        useBatchFetch: true,
+        from: "en",
+        to: "zh",
+        fromLang: "English",
+        toLang: "zh-CN",
+        texts: ["A <b>React</b> component.", "Line 1\nLine 2"],
+        glossary: { component: "组件", React: "" },
+        docInfo: { title: "", description: "" },
+      });
+      expect(userMsg.content).toBe(expectedInput);
     }
   });
 
@@ -148,5 +177,62 @@ describe("batch system prompt example", () => {
     const content = JSON.parse(init.body).messages[0].content;
     expect(content).toBe("Subtitle rules.");
     expect(content).not.toContain("Example:");
+  });
+});
+
+// 批量解码侧：按系统提示词判定输出格式，并把对应 preset 的 denormalize 注入 parseAIRes。
+describe("batch decode (denormalize wiring)", () => {
+  const makeResponse = (content) => ({
+    choices: [{ message: { role: "assistant", content } }],
+  });
+
+  const parseOpenAI = (content, systemPrompt) =>
+    parseTransRes(makeResponse(content), {
+      apiType: OPT_TRANS_OPENAI,
+      useBatchFetch: true,
+      systemPrompt,
+    });
+
+  test("XML batch decodes escaped entities back to rich text", async () => {
+    const result = await parseOpenAI(
+      '<root>\n    <t id="0" sourceLanguage="en">一个&lt;b&gt;React&lt;/b&gt;组件</t>\n</root>',
+      defaultSystemPromptXml
+    );
+    expect(result).toEqual([["一个<b>React</b>组件", "en"]]);
+  });
+
+  test("XML batch keeps &amp;lt; as a literal single-pass restore", async () => {
+    const result = await parseOpenAI(
+      '<root><t id="0" sourceLanguage="en">&amp;lt;br&amp;gt;</t></root>',
+      defaultSystemPromptXml
+    );
+    expect(result).toEqual([["&lt;br&gt;", "en"]]);
+  });
+
+  test("LINE batch folds <br> to newlines and denormalizes literal <br>", async () => {
+    const result = await parseOpenAI(
+      "0 | 第一行<br>第二行\n1 | a &lt;br&gt; b",
+      defaultSystemPromptLines
+    );
+    expect(result).toEqual([
+      ["第一行\n第二行", ""],
+      ["a <br> b", ""],
+    ]);
+  });
+
+  test("json batch keeps text verbatim (identity decode)", async () => {
+    const result = await parseOpenAI(
+      '{"translations":[{"id":0,"text":"A & B <b>c</b>","sourceLanguage":"en"}]}',
+      defaultSystemPrompt
+    );
+    expect(result).toEqual([["A & B <b>c</b>", "en"]]);
+  });
+
+  test("plain-text fallback still decodes per preset", async () => {
+    const result = await parseOpenAI(
+      "一个&lt;b&gt;React&lt;/b&gt;组件",
+      defaultSystemPromptXml
+    );
+    expect(result).toEqual([["一个<b>React</b>组件", ""]]);
   });
 });
