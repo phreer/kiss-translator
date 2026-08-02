@@ -5,6 +5,7 @@
 //   supported filters:
 //   - json: JSON.stringify filter
 //   - raw: raw value filter (null/undefined -> empty string)
+//
 //   {% for item in list %}   loop; body runs once per element
 //   {% if [not] path %}      conditional; truthiness of the resolved value
 //   {% endfor %} / {% endif %}  close the loop / conditional
@@ -12,7 +13,7 @@
 // Loop context exposes: loop.index (0-based), loop.last (boolean).
 // Literal text between tags is rendered as-is (tags are zero-width).
 
-const ALLOWED_FILTERS = new Set(["json", "raw", "text"]);
+const ALLOWED_FILTERS = new Set(["json", "raw"]);
 
 const applyFilters = (value, filters) => {
   if (filters.length === 0) {
