@@ -21,7 +21,6 @@
     "react-router-dom": "^6.16.0",
     "react-scripts": "5.0.1",
     "sval": "^0.5.2",
-    "typescript": "^6.0.3",
     "webdav": "^5.3.0",
     "webextension-polyfill": "^0.10.0"
   },
@@ -81,7 +80,6 @@
     "@babel/node": "^7.22.19",
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@babel/preset-env": "^7.22.20",
-    "@typescript/typescript6": "^6.0.0",
     "bestzip": "^2.2.1",
     "cross-env": "^7.0.3",
     "dotenv": "^17.2.1",
