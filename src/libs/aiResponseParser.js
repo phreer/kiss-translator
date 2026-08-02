@@ -287,9 +287,9 @@ export const renderXmlOutput = (segments) =>
     "<root>",
     ...segments.map(
       (seg) =>
-        `    <t id="${seg.id}" sourceLanguage="${rowSource(seg)}">${rowText(
-          seg
-        ).replace(/\n/g, "<br>")}</t>`
+        `    <t id="${seg.id}" sourceLanguage="${xmlCodec.normalize(
+          rowSource(seg)
+        )}">${xmlCodec.normalize(rowText(seg)).replace(/\n/g, "<br>")}</t>`
     ),
     "</root>",
   ].join("\n");
@@ -302,7 +302,12 @@ export const renderXmlOutput = (segments) =>
  */
 export const renderLineOutput = (segments) =>
   segments
-    .map((seg) => `${seg.id} | ${rowText(seg).replace(/\n/g, "<br>")}`)
+    .map(
+      (seg) =>
+        `${seg.id} | ${textlinesCodec
+          .normalize(rowText(seg))
+          .replace(/\n/g, "<br>")}`
+    )
     .join("\n");
 
 /**
@@ -311,10 +316,98 @@ export const renderLineOutput = (segments) =>
  * @returns {string} 可直接被 `parsePercentTranslationSegments` 解析的文本
  */
 export const renderPercentOutput = (segments) =>
-  segments.map((seg) => `[${seg.id}]\n${rowText(seg)}`).join("\n%%\n\n");
+  segments
+    .map((seg) => `[${seg.id}]\n${percentCodec.normalize(rowText(seg))}`)
+    .join("\n%%\n\n");
 
 /**
- * 预置解析器注册表：每个格式同时携带解析函数与对应的输出渲染函数，
+ * 创建转义编解码器。
+ *
+ * normalize 依 `escapes` 顺序逐条全局替换：`&`/`\` 等基础符号必须先转，再转结构标记，
+ * 使模型输出中不可能出现与输出格式结构字符（`<t>`、`%%`、`digits |` 等）冲突的字面内容。
+ * denormalize 是单趟逆映射：若分两次 replaceAll，`&amp;lt;` 会被逐步误还原成 `<`，
+ * 单趟正则则能在一次扫描内把 `&amp;lt;` 还原成 `&lt;`。换行标记（`\n`→`<br>`）由各
+ * parse 函数自己还原，不进入 denormalize，避免把译文里保字面的 `<br>` 误还原成换行。
+ *
+ * 每个转义项为 `[from, to, reverseTo]`：
+ * - from 为字符串或带 g 标志的正则，用于 normalize 的匹配；
+ * - to 为 normalize 的替换文本，也是 denormalize 要匹配的文本；
+ * - reverseTo 是可选的 denormalize 还原文本，from 为正则时必须提供
+ *   （例如 `<br/>` 归一为规范形 `<br>`）。
+ *
+ * @param {Array<[string|RegExp, string, string?]>} escapes 有序转义项
+ * @param {string} [promptNote] 追加到 Output example 之后的格式说明
+ * @returns {{normalize: Function, denormalize: Function, promptNote: string}}
+ */
+export const createEscapeCodec = (escapes = [], promptNote = "") => {
+  const normalize = (value) => {
+    let text = String(value ?? "");
+    for (const [from, to] of escapes) {
+      text =
+        typeof from === "string"
+          ? text.replaceAll(from, to)
+          : text.replace(from, to);
+    }
+    return text;
+  };
+
+  const reverse = new Map();
+  for (const [from, to, reverseTo] of escapes) {
+    if (from === "\n") continue;
+    const back = reverseTo ?? (typeof from === "string" ? from : "");
+    if (back) reverse.set(to, back);
+  }
+
+  const reversePattern =
+    reverse.size > 0
+      ? new RegExp(
+          [...reverse.keys()]
+            .map((key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("|"),
+          "g"
+        )
+      : null;
+
+  const denormalize = (value) => {
+    const text = String(value ?? "");
+    return reversePattern
+      ? text.replace(reversePattern, (match) => reverse.get(match))
+      : text;
+  };
+
+  return { normalize, denormalize, promptNote };
+};
+
+// 各格式的转义表与提示备注。实体集刻意取最小：`&quot;`/`&apos;` 只影响属性，
+// 文本内容不需要转，减少噪声与保真风险。
+const xmlCodec = createEscapeCodec(
+  [
+    ["&", "&amp;"],
+    ["<", "&lt;"],
+    [">", "&gt;"],
+  ],
+  "Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively."
+);
+
+const textlinesCodec = createEscapeCodec(
+  [
+    ["&", "&amp;"],
+    [/<br\s*\/?>/gi, "&lt;br&gt;", "<br>"],
+    ["\n", "<br>"],
+  ],
+  "Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;."
+);
+
+const percentCodec = createEscapeCodec(
+  [
+    ["\\", "\\\\"],
+    ["%", "\\%"],
+  ],
+  "Write a literal % as \\% and a literal backslash as \\\\."
+);
+
+/**
+ * 预置解析器注册表：每个格式同时携带解析函数、对应的输出渲染函数与转义编解码器，
  * 供 decoder 解析与 Output example 自动生成共用，是 Step 3/5 的统一入口。
  */
 export const parserPresets = {
@@ -323,24 +416,36 @@ export const parserPresets = {
     mappingMode: "by_id",
     parse: parseJsonTranslationSegments,
     render: renderJsonOutput,
+    normalize: identity,
+    denormalize: identity,
+    promptNote: "",
   },
   xml: {
     name: "xml",
     mappingMode: "by_id",
     parse: parseXmlTranslationSegments,
     render: renderXmlOutput,
+    normalize: xmlCodec.normalize,
+    denormalize: xmlCodec.denormalize,
+    promptNote: xmlCodec.promptNote,
   },
   textlines: {
     name: "textlines",
     mappingMode: "by_id",
     parse: parseLineTranslationSegments,
     render: renderLineOutput,
+    normalize: textlinesCodec.normalize,
+    denormalize: textlinesCodec.denormalize,
+    promptNote: textlinesCodec.promptNote,
   },
   percent: {
     name: "percent",
     mappingMode: "by_order",
     parse: parsePercentTranslationSegments,
     render: renderPercentOutput,
+    normalize: percentCodec.normalize,
+    denormalize: percentCodec.denormalize,
+    promptNote: percentCodec.promptNote,
   },
 };
 

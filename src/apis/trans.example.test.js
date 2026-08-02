@@ -31,7 +31,7 @@ const EXAMPLE_OUTPUT_JSON =
   '{"translations":[{"id":0,"text":"一个<b>React</b>组件","sourceLanguage":"en"},{"id":1,"text":"第一行\\n第二行","sourceLanguage":"en"}]}';
 
 const EXAMPLE_OUTPUT_XML =
-  '<root>\n    <t id="0" sourceLanguage="en">一个<b>React</b>组件</t>\n    <t id="1" sourceLanguage="en">第一行<br>第二行</t>\n</root>';
+  '<root>\n    <t id="0" sourceLanguage="en">一个&lt;b&gt;React&lt;/b&gt;组件</t>\n    <t id="1" sourceLanguage="en">第一行<br>第二行</t>\n</root>';
 
 const EXAMPLE_OUTPUT_LINE = "0 | 一个<b>React</b>组件\n1 | 第一行<br>第二行";
 
