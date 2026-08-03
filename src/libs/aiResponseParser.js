@@ -334,10 +334,9 @@ export const renderPercentOutput = (segments) =>
  *   （例如 `<br/>` 归一为规范形 `<br>`）。
  *
  * @param {Array<[string|RegExp, string, string?]>} escapes 有序转义项
- * @param {string} [promptNote] 追加到 Output example 之后的格式说明
  * @returns {{normalize: Function, denormalize: Function, promptNote: string}}
  */
-export const createEscapeCodec = (escapes = [], promptNote = "") => {
+export const createEscapeCodec = (escapes = []) => {
   const normalize = (value) => {
     let text = String(value ?? "");
     for (const [from, to] of escapes) {
@@ -373,7 +372,7 @@ export const createEscapeCodec = (escapes = [], promptNote = "") => {
       : text;
   };
 
-  return { normalize, denormalize, promptNote };
+  return { normalize, denormalize };
 };
 
 // 各格式的转义表与提示备注。实体集刻意取最小：`&quot;`/`&apos;` 只影响属性，
@@ -384,7 +383,6 @@ const xmlCodec = createEscapeCodec(
     ["<", "&lt;"],
     [">", "&gt;"],
   ],
-  "Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively."
 );
 
 const textlinesCodec = createEscapeCodec(
@@ -393,7 +391,6 @@ const textlinesCodec = createEscapeCodec(
     [/<br\s*\/?>/gi, "&lt;br&gt;", "<br>"],
     ["\n", "<br>"],
   ],
-  "Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;."
 );
 
 const percentCodec = createEscapeCodec(
@@ -401,8 +398,30 @@ const percentCodec = createEscapeCodec(
     ["\\", "\\\\"],
     ["%", "\\%"],
   ],
-  "Write a literal % as \\% and a literal backslash as \\\\."
 );
+
+const jsonOutputFormatNote =
+`Output a single raw JSON object only. No extra text or fences.
+Keep id, order, and count of segments.
+Detect sourceLanguage for each segment.
+Fail-safe: On any error, return {"translations":[]}.`;
+
+const xmlOutputFormatNote =
+`Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
+Maintain the exact "id" from the input in the "id" attribute. Detect the source language for the "sourceLanguage" attribute.
+Output ONLY the <root> element and its children. Do not include "xml" version declarations or markdown code blocks.
+Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively.`;
+
+const textlinesOutputFormatNote =
+`Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
+Output exactly one line per segment using the format: "{id} | {translated_text}".
+On error, return empty text.
+You MUST copy the exact "id" from the input segment to the output line.
+Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;.`;
+
+const percentOuputFormatNote =
+`Write a literal % as \\% and a literal backslash as \\\\.
+Preserve the order of segments as they appear in the input.`;
 
 /**
  * 预置解析器注册表：每个格式同时携带解析函数、对应的输出渲染函数与转义编解码器，
@@ -416,7 +435,7 @@ export const parserPresets = {
     render: renderJsonOutput,
     normalize: identity,
     denormalize: identity,
-    promptNote: "",
+    promptNote: jsonOutputFormatNote,
   },
   xml: {
     name: "xml",
@@ -425,7 +444,7 @@ export const parserPresets = {
     render: renderXmlOutput,
     normalize: xmlCodec.normalize,
     denormalize: xmlCodec.denormalize,
-    promptNote: xmlCodec.promptNote,
+    promptNote: xmlOutputFormatNote,
   },
   textlines: {
     name: "textlines",
@@ -434,7 +453,7 @@ export const parserPresets = {
     render: renderLineOutput,
     normalize: textlinesCodec.normalize,
     denormalize: textlinesCodec.denormalize,
-    promptNote: textlinesCodec.promptNote,
+    promptNote: textlinesOutputFormatNote,
   },
   percent: {
     name: "percent",
@@ -443,7 +462,7 @@ export const parserPresets = {
     render: renderPercentOutput,
     normalize: percentCodec.normalize,
     denormalize: percentCodec.denormalize,
-    promptNote: percentCodec.promptNote,
+    promptNote: percentOuputFormatNote,
   },
 };
 

@@ -35,8 +35,6 @@ import {
   defaultNobatchPrompt,
   defaultNobatchUserPrompt,
   defaultDictUserPrompt,
-  defaultSystemPromptXml,
-  defaultSystemPromptLines,
   THINKING_PARAM_MAP,
   resolveIoPreset,
   getInputFormatPreset,
@@ -185,8 +183,8 @@ const buildBatchExample = (
     inputFormat,
     outputFormat
   );
-  const note = outputFormat.promptNote ? `\n${outputFormat.promptNote}` : "";
-  return `## Example
+
+  let result = `## Input Output protocol
 You will receive a batch of text segments in the input format below, and the output should be in the format specified below.
 
 ### Input
@@ -201,8 +199,11 @@ The output should be in the following format:
 ${output_example}
 \`\`\`
 
-## Note
-${note}`;
+`;
+  if (outputFormat.promptNote) {
+    result += `### Note\n${outputFormat.promptNote}`;
+  }
+  return result;
 };
 
 // 供 UI 预览使用：按格式名渲染请求时自动追加到系统提示词的示例，
@@ -1249,8 +1250,6 @@ export const genTransReq = async ({ reqHook, ...args }) => {
         {
           ...args,
           defaultSystemPrompt,
-          defaultSystemPromptXml,
-          defaultSystemPromptLines,
           defaultSubtitlePrompt,
           defaultNobatchPrompt,
           defaultNobatchUserPrompt,

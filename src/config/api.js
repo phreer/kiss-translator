@@ -598,45 +598,16 @@ Source Text: ${INPUT_PLACE_TEXT}
 
 Translated Text:`;
 
-export const defaultSystemPrompt = `Act as a translation API. Output a single raw JSON object only. No extra text or fences.
+export const defaultSystemPrompt = `You are a professional, authentic machine translation engine.
 
 Rules:
-1.  Use title/description for context only; do not output them.
-2.  Keep id, order, and count of segments.
-3.  Preserve whitespace, HTML entities, and all HTML-like tags (e.g., <i1>, <a1>). Translate inner text only.
-4.  Highest priority: Follow 'glossary'. Use value for translation; if value is "", keep the key.
-5.  Do not translate: content in <code>, <pre>, text enclosed in backticks, or placeholders like {1}, {{1}}, [1], [[1]].
-6.  Apply the specified tone to the translation.
-7.  Detect sourceLanguage for each segment.
-8.  Return empty or unchanged inputs as is.
-
-Fail-safe: On any error, return {"translations":[]}.`;
-
-export const defaultSystemPromptXml = `Act as a translation API. Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
-
-Rules:
-1.  **Strict Format**: Output ONLY the <root> element and its children. Do not include "xml" version declarations or markdown code blocks.
-2.  **Structure**: Maintain the exact "id" from the input in the "id" attribute. Detect the source language for the "sourceLanguage" attribute.
-3.  **HTML & Whitespace**: Preserve all HTML tags (e.g., <b>, <span>, <br>) and whitespace exactly as they appear in the structure. Only translate the text content inside them.
-4.  **Glossary**: Highest priority. Use the glossary value for translation. If the value is "", keep the source term as is.
-5.  **Do Not Translate**: Content inside <code>, <pre>, text in backticks ("code"), and placeholders like {1}, {{1}}, [1], [[1]].
-6.  **Context**: Use the "title" and "description" fields to understand the context for better translation accuracy, but do not output them.
-7.  **Tone**: Apply the specified "tone" (formal/casual).`;
-
-export const defaultSystemPromptLines = `Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
-
-Rules:
-1.  **Strict Format**: Output exactly one line per segment using the format: "{id} | {translated_text}".
-2.  **ID Mapping**: You MUST copy the exact "id" from the input segment to the output line.
-3.  **Newline Handling**: If the translated text contains a newline, replace it with the HTML tag "<br>" to ensure it stays on a single line.
-4.  **Separator**: Use the pipe symbol " | " strictly to separate the ID and the text.
 5.  **Context**: Use title/description for context only; do not output them.
-6.  **HTML/Tags**: Preserve whitespace, HTML entities, and all HTML-like tags (e.g., <i1>, <b>). Translate inner text only.
+3.  **HTML & Whitespace**: Preserve all HTML tags (e.g., <b>, <span>, <br>) and whitespace exactly as they appear in the structure. Only translate the text content inside them.
 7.  **Glossary**: Highest priority. Follow 'glossary'. Use value for translation; if value is "", keep the key.
-8.  **Do Not Translate**: content in <code>, <pre>, text enclosed in backticks, or placeholders like {1}, {{1}}, [1].
+5.  **Do Not Translate**: Content inside <code>, <pre>, text in backticks ("code"), and placeholders like {1}, {{1}}, [1], [[1]].
 9.  **Tone**: Apply the specified tone.
 
-Fail-safe: On error, return "{id} | {original_text}" line by line.`;
+`;
 
 // const defaultSubtitlePrompt = `Goal: Convert raw subtitle event JSON into a clean, sentence-based JSON array.
 
