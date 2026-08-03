@@ -1000,10 +1000,11 @@ const PERCENT_INPUT_TEMPLATE = `Target Language: {{to_lang|raw}}
 {{glossary_lines|raw}}
 {% endif %}{% if tone %}Tone: {{tone|raw}}
 {% endif %}Segments:
-{% for seg in segments %}[{{seg.id}}]
+{% for seg in segments %}
 {{seg.source_text|raw}}{% if not loop.last %}
 
 %%
+
 {% endif %}{% endfor %}`;
 
 const PLAINTEXT_INPUT_TEMPLATE = `Translate to {{to_lang|raw}}:

@@ -960,6 +960,26 @@ export function resolveApiPromptSettings(
   return nextApiSetting;
 }
 
+// 提示词测试（提示词管理页"测试"按钮）：把被测试提示词的配置应用到已解析的
+// API 配置副本上，并强制走与被测提示词匹配的批量/非批量路径，保证测试反映的是
+// "当前提示词"而非所选 API 的存储配置。批量提示词同时内联输入/输出格式，
+// 与 genTransReq 追加示例、响应解析共用同一份格式，避免格式漂移。
+export function applyPromptTestOverrides(resolvedApi = {}, prompt = {}) {
+  const next = { ...resolvedApi };
+  if (prompt.category === PROMPT_CATEGORY_BATCH_SYSTEM) {
+    next.useBatchFetch = true;
+    next.systemPrompt = prompt.systemPrompt;
+    next.ioInputFormat = prompt.inputFormat || "json";
+    next.ioOutputFormat = prompt.outputFormat || "json";
+    next.ioInputTemplate = prompt.inputTemplate || "";
+  } else if (prompt.category === PROMPT_CATEGORY_USER) {
+    next.useBatchFetch = false;
+    next.nobatchPrompt = prompt.systemPrompt;
+    next.nobatchUserPrompt = prompt.userPrompt;
+  }
+  return next;
+}
+
 /**
  * 批量解析 API 列表中的提示词配置。
  * 遍历所有 API，逐个调用 resolveApiPromptSettings，返回展开实际提示词文本后的新数组。

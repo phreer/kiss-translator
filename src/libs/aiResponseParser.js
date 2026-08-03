@@ -231,15 +231,13 @@ export const parsePercentTranslationSegments = (
   { decodeText = identity } = {}
 ) => {
   const segments = [];
-  const blocks = String(content || "").split(/\s*%%\s*/);
+  const blocks = String(content || "").split("\n%%\n");
 
-  for (const block of blocks) {
+  for (const [id, block] of blocks.entries()) {
     const trimmed = block.trim();
     if (!trimmed) continue;
 
-    const headerMatch = trimmed.match(/^\[(\d+)\]\s*[\r\n]+([\s\S]*)$/);
-    const id = headerMatch ? Number(headerMatch[1]) : segments.length;
-    const rawText = headerMatch ? headerMatch[2] : trimmed;
+    const rawText = trimmed;
 
     segments.push({
       id,
@@ -317,8 +315,8 @@ export const renderLineOutput = (segments) =>
  */
 export const renderPercentOutput = (segments) =>
   segments
-    .map((seg) => `[${seg.id}]\n${percentCodec.normalize(rowText(seg))}`)
-    .join("\n%%\n\n");
+    .map((seg) => `${percentCodec.normalize(rowText(seg))}`)
+    .join("\n\n%%\n\n");
 
 /**
  * 创建转义编解码器。

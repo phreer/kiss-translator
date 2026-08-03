@@ -186,7 +186,23 @@ const buildBatchExample = (
     outputFormat
   );
   const note = outputFormat.promptNote ? `\n${outputFormat.promptNote}` : "";
-  return `## Example:\n### Input\n\`\`\`\n${input_example}\n\`\`\`\n### Output\n\`\`\`\n${output_example}\n\`\`\`\n## Note: ${note}`;
+  return `## Example
+You will receive a batch of text segments in the input format below, and the output should be in the format specified below.
+
+### Input
+The input looks like:
+\`\`\`
+${input_example}
+\`\`\`
+
+### Output
+The output should be in the following format:
+\`\`\`
+${output_example}
+\`\`\`
+
+## Note
+${note}`;
 };
 
 // 供 UI 预览使用：按格式名渲染请求时自动追加到系统提示词的示例，

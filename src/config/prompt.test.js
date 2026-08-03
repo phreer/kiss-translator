@@ -4,11 +4,14 @@ import {
   DEFAULT_NOBATCH_PROMPT_SLUG,
   DEFAULT_SUBTITLE_PROMPT_SLUG,
   PRESET_PROMPTS,
+  PROMPT_CATEGORY_BATCH_SYSTEM,
   PROMPT_CATEGORY_DICTIONARY,
+  PROMPT_CATEGORY_USER,
   PROMPT_MODE_FOLLOW_API,
   PROMPT_MODE_GLOBAL,
   PROMPT_TEMPLATE_CATEGORIES,
   SETTINGS_VERSION_V2,
+  applyPromptTestOverrides,
   getDictionaryPromptOptions,
   getPromptDisplayName,
   migrateSettingPromptsToV2,
@@ -411,5 +414,69 @@ describe("prompt settings", () => {
       outputFormat: "xml",
       inputTemplate: "Tpl {{to_lang|raw}}",
     });
+  });
+});
+
+describe("applyPromptTestOverrides", () => {
+  test("batch prompt forces batch mode and inlines its format", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      systemPrompt: "Custom batch rules.",
+      inputFormat: "percent",
+      outputFormat: "xml",
+      inputTemplate: "Tpl {{to_lang|raw}}",
+    };
+    expect(
+      applyPromptTestOverrides({ useBatchFetch: false }, prompt)
+    ).toEqual({
+      useBatchFetch: true,
+      systemPrompt: "Custom batch rules.",
+      ioInputFormat: "percent",
+      ioOutputFormat: "xml",
+      ioInputTemplate: "Tpl {{to_lang|raw}}",
+    });
+  });
+
+  test("batch prompt falls back to json/json for empty formats", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      systemPrompt: "Rules.",
+      inputFormat: "",
+      outputFormat: "",
+      inputTemplate: "",
+    };
+    expect(applyPromptTestOverrides({}, prompt)).toEqual({
+      useBatchFetch: true,
+      systemPrompt: "Rules.",
+      ioInputFormat: "json",
+      ioOutputFormat: "json",
+      ioInputTemplate: "",
+    });
+  });
+
+  test("user prompt forces non-batch mode and overrides nobatch fields", () => {
+    const prompt = {
+      category: PROMPT_CATEGORY_USER,
+      systemPrompt: "Custom nobatch.",
+      userPrompt: "Custom user.",
+    };
+    expect(
+      applyPromptTestOverrides({ useBatchFetch: true }, prompt)
+    ).toEqual({
+      useBatchFetch: false,
+      nobatchPrompt: "Custom nobatch.",
+      nobatchUserPrompt: "Custom user.",
+    });
+  });
+
+  test("other categories pass through unchanged without mutating the input", () => {
+    const api = { useBatchFetch: true, apiSlug: "openai" };
+    const prompt = {
+      category: PROMPT_CATEGORY_DICTIONARY,
+      systemPrompt: "Dict.",
+    };
+    const result = applyPromptTestOverrides(api, prompt);
+    expect(result).toEqual(api);
+    expect(result).not.toBe(api);
   });
 });

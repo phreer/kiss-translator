@@ -7,6 +7,20 @@ Add configurable LLM input/output formats to kiss-translator, using:
 - **Decoder**: predefined output format presets (json, xml, textlines, percent)
 - **IO Presets**: combined encoder+decoder pairs for simple configuration
 
+## Progress
+
+| Step | Status |
+|------|--------|
+| Step 1: Template Engine | DONE |
+| Step 1.5: System Prompt Example Extraction | DONE |
+| Step 2: Encoder Presets | DONE |
+| Step 3: Decoder Presets | DONE |
+| Step 3.5: Escape Codec & Placeholder Unification | DONE (escape engine; batch wiring pending in Step 5) |
+| Step 4: IO Format Resolution | DONE |
+| Step 5: Wire Up in trans.js | PENDING |
+| Step 6: Config Schema & Migration | DONE (格式为批处理提示词属性；无迁移，旧 io 字段作废) |
+| Step 7: Extend E2E Tests | PARTIAL (unit + wiring tests added; real-model E2E pending) |
+
 ## Base
 
 - **Directory**: `~/workspace/ai/kiss-translator-dev`
@@ -23,7 +37,11 @@ Add configurable LLM input/output formats to kiss-translator, using:
 | `genTransReq()` | `trans.js:1011` | Assemble full request (calls above functions) |
 | `parseCompleteTranslationSegments()` | `aiResponseParser.js` | Unified parser (tries JSON→XML→LINE) |
 
-## Step 1: Template Engine
+## Step 1: Template Engine (DONE) — ✅ DONE (2026-08-02)
+
+> Implemented on branch `io` (based on `origin/dev`). Beyond the original spec, Step 1 also:
+> - Refactored `genUserPrompt()` batch branch (`trans.js`) to render a single-line `JSON_INPUT_TEMPLATE` via the engine, keeping **byte-identical** output (verified by `src/apis/trans.userPrompt.test.js`).
+> - Hardened source parsing (strict tokenizer + compile-time validation), see "Status" below.
 
 **Create:**
 - `src/libs/template.js` (~120 lines, zero dependencies)
@@ -44,7 +62,7 @@ render(instructions, context) → string
 renderTemplate(source, context) → string  // convenience
 ```
 
-**Test cases (~30):**
+**Test cases (53 total: 37 original + 16 hardening):**
 - Variable substitution: `{{var}}`, `{{var|json}}`, `{{var|raw}}`, null handling
 - For loops: basic, with `loop.index`, with `loop.last`, empty list, nested
 - If conditions: truthy, falsy, `{% if not loop.last %}`
@@ -56,14 +74,53 @@ renderTemplate(source, context) → string  // convenience
 - Special characters in loop body: quotes, newlines, HTML entities
 - Large segment list (10+ items): verify no truncation or performance issue
 
-**Verify:** `npm test -- --runTestsByPath src/libs/template.test.js`
+**Verify:** `npm test -- --runTestsByPath src/libs/template.test.js` ✅ (53 tests)
+
+### Status (implementation notes)
+
+Files created/modified:
+- `src/libs/template.js` — CREATE. Engine: `{{path}}`, `{{path|json}}`, `{{path|raw|text}}`, `{% for item in list %}`, `{% if [not] path %}`, `loop.index` (0-based), `loop.last`. Compile-time validations: filter allowlist (`json`/`raw`/`text`), empty expression/condition, malformed `for`, bare `not`, non-string source → all throw.
+- `src/libs/template.test.js` — CREATE. 53 tests (37 functional + 16 error-handling), covering the plan's content categories (LITERARY/MEDICAL/TECHNICAL/EDGE_CASE/DIALOGUE), Unicode, special chars, large lists, and malformed sources.
+- `src/apis/trans.js` — MODIFY. `genUserPrompt()` batch branch now uses `renderTemplate(JSON_INPUT_TEMPLATE, ...)`; `has_glossary` precomputed because `{}` is truthy in JS. Output is byte-identical to the previous hardcoded `JSON.stringify(promptObj)`.
+- `src/apis/trans.userPrompt.test.js` — CREATE. 7 regression tests asserting byte-identical user prompt via `genTransReq`.
+
+Hardening rationale (added before Step 2, since encoder templates will come from user config):
+- Stray `}}`/`%}` and unclosed `{{`/`{%` now throw (previously rendered as literal text).
+- Unknown filters like `{{ x|foo }}` throw instead of silently degrading to raw.
+- Nested braces (`{{ {{ x }} }}`), empty expressions, empty/bare-`not` `if`, malformed `for`, and non-string sources all throw with descriptive messages.
+
+Regression: full suite 470 tests pass (pre-existing unrelated failure: `src/views/Options/Prompts.test.js` — `@streamparser/json` not Babel-transformed in node_modules).
 
 ---
 
-## Step 2: Encoder Presets
+## Step 1.5: System Prompt Example Extraction (DONE)
 
-**Modify:** `src/config/api.js`
-**Create:** `src/apis/encoder.test.js` (~15 tests)
+Strip the hardcoded `Example:` block out of the batch system prompts. The example `Input` is now generated from the same template that builds the real batch user message, so the two can never drift; the example `Output` is hardcoded per format for now (until Step 5c's `decoder.renderSample` takes over).
+
+**Modify:** `src/config/api.js`, `src/apis/trans.js`
+**Create:** `src/apis/trans.example.test.js` (8 tests)
+
+- `src/config/api.js` — remove the `Example:`/`Input:`/`Output:` block from `defaultSystemPrompt`, `defaultSystemPromptXml`, `defaultSystemPromptLines` (Rules / Output Format / Fail-safe kept). The subtitle prompt's example (api.js:788) is out of scope: its input is built from subtitle events, not the template.
+- `src/apis/trans.js` — module constants: shared example context (`to_lang="zh-CN"`, two segments covering HTML tags + a newline, glossary with an empty-value keep-key demo) plus three hardcoded outputs (`EXAMPLE_OUTPUT_JSON`/`XML`/`LINE`).
+  - `renderExampleInput()` → `renderTemplate(JSON_INPUT_TEMPLATE, exampleContext)`.
+  - `detectBatchFormat(systemPrompt)` → `xml` (contains `<root>`), `textlines` (`ID | Text`), else `json`.
+  - `buildBatchExample(systemPrompt)` → `Example:\nInput: <rendered>\nOutput: <per-format hardcoded>`.
+  - In `genTransReq`, the example is appended to the system prompt only when `useBatchFetch && !events`. `useBatchFetch` selects the batch prompt + enables the batch example; `!events` excludes the subtitle path, which reuses `genTransReq` with `useBatchFetch` possibly `true` but has its own protocol.
+- `src/apis/trans.example.test.js` — 8 tests: three formats each append the correct output, all three share a byte-identical example input, example input equals a real batch user message with the same data, custom prompt without markers falls back to JSON, and non-batch / subtitle paths never append.
+
+**Known limitations (resolved in later steps):**
+- Custom prompts copied from old defaults still embed their own example, so such requests briefly see two examples (until Step 6 makes format explicit).
+- Output is a hardcoded placeholder until Step 5c's `decoder.renderSample`.
+
+**Verify:** `npm test -- --runTestsByPath src/apis/trans.example.test.js src/apis/trans.userPrompt.test.js` ✅ (15 tests)
+
+Regression: full suite 478 tests pass (pre-existing unrelated failure: `src/views/Options/Prompts.test.js`).
+
+---
+
+## Step 2: Encoder Presets — ✅ DONE (2026-08-02)
+
+**Modify:** `src/config/api.js` (registry `inputFormatPresets` + `getInputFormatPreset`; tests merged into `ioPreset.test.js`)
 
 **Encoder presets:**
 
@@ -72,7 +129,9 @@ renderTemplate(source, context) → string  // convenience
 | `json` | `{"targetLanguage":{{to_lang\|json}},"segments":[{% for seg in segments %}{"id":{{seg.id}},"text":{{seg.source_text\|json}}}{% if not loop.last %},{% endif %}{% endfor %}],...}` | Most models, reliable |
 | `percent` | `Target Language: {{to_lang}}\n...\nSegments:\n{% for seg in segments %}[{{seg.id}}]\n{{seg.source_text}}{% if not loop.last %}\n%%\n\n{% endif %}{% endfor %}` | Small models |
 | `plaintext` | `Translate to {{ to_lang }}:\n{% for seg in segments %}{{seg.source_text}}{% if not loop.last %}\n{% endif %}{% endfor %}` | Simplest |
-| `custom` | User-defined template | Power users |
+| `custom` | User-defined template (`llmInputTemplate`, 留空回退 json) | Power users |
+
+> Percent 输入 normalize 复用 percent 输出 codec（`%`→`\%`、`\`→`\\`），与 D4 双级转义合并逻辑（percent/percent 只转义一次）一起在 `trans.example.test.js` 验证。
 
 **Test cases (~25):**
 - JSON encoder with LITERARY segments: verify valid JSON, special quotes preserved
@@ -96,52 +155,154 @@ renderTemplate(source, context) → string  // convenience
 
 ---
 
-## Step 3: Decoder Presets
+## Step 3: Decoder Presets (DONE) — ✅ DONE (2026-08-02)
 
-**Modify:** `src/config/api.js`
-**Create:** `src/apis/decoder.test.js` (~15 tests)
+> Implemented on branch `io`. Beyond the original spec:
+> - Output example is now **auto-generated** via `parser.render(SAMPLE_TRANSLATIONS)`, replacing the hardcoded `EXAMPLE_OUTPUT_JSON/XML/LINE` + `detectBatchFormat` heuristic lookup in `trans.js`. Verified byte-identical by the existing `trans.example.test.js` golden tests.
+> - Instead of a `class`, each format is a **plain-object preset** in a `parserPresets` registry: `{ name, mappingMode, parse, render }`. `render` is the exact inverse of `parse` for the same format, so the sample can never drift from the parser.
+> - Added the missing `percent` decoder (`parsePercentTranslationSegments`, `%%` split, by_order) and its `render`.
+> - Streaming is untouched and deferred to Step 5/7 (existing `createStreamingJsonParser` / `parseStreamingSegments` still own streaming).
+
+**Modify:** `src/libs/aiResponseParser.js`, `src/apis/trans.js`
+**Create:** `src/libs/aiResponseParser.decoder.test.js` (21 tests)
 
 **Decoder presets** (build on upstream's `aiResponseParser.js`):
 
-| Decoder | Parser Function | Mapping |
-|---------|----------------|---------|
-| `json` | `parseJsonTranslationSegments()` | by_id |
-| `xml` | `parseXmlTranslationSegments()` | by_id |
-| `textlines` | `parseLineTranslationSegments()` | by_id |
-| `percent` | split on `%%` | by_order |
+| Decoder | Parser Function | Render (inverse) | Mapping |
+|---------|----------------|------------------|---------|
+| `json` | `parseJsonTranslationSegments()` | `renderJsonOutput()` | by_id |
+| `xml` | `parseXmlTranslationSegments()` | `renderXmlOutput()` | by_id |
+| `textlines` | `parseLineTranslationSegments()` | `renderLineOutput()` | by_id |
+| `percent` | `parsePercentTranslationSegments()` | `renderPercentOutput()` | by_order |
 
-**Test cases:**
-- Each preset parses valid LLM output correctly
-- JSON: markdown-wrapped, extra text around JSON, nested objects
-- XML: different tag names (t, item, seg), attributes, inner HTML
-- TextLines: pipe-separated, missing ids, `<br>` handling
-- Percent: %% separation, empty segments
-- Edge cases: empty input, malformed output
+**Test cases (21):**
+- Render golden bytes: `renderJsonOutput/renderXmlOutput/renderLineOutput` outputs equal the three pinned `EXAMPLE_OUTPUT_*` constants in `trans.example.test.js`
+- Percent render mirrors the percent encoder block structure
+- Render: empty list, quote/backslash escaping, tolerant of `{id, translation, source_language}` shape
+- Percent parser: `%%` split, missing `[id]` → by_order, empty blocks, internal newlines, decodeText, malformed input
+- Round-trip `parse(render(x))` for all four presets (incl. documented `<br>` asymmetry for XML and source-drop for line/percent)
+- Registry: preset keys, mapping modes, `getParserPreset` fallback
 
-**Verify:** `npm test -- --runTestsByPath src/apis/decoder.test.js`
+**Verify:** `CI=true pnpm test src/libs/aiResponseParser.decoder.test.js src/libs/aiResponseParser.test.js src/apis/trans.example.test.js src/apis/trans.userPrompt.test.js` ✅ (44 tests)
+
+> Note: `--runTestsByPath` doesn't work with this repo's react-app-rewired jest setup (jest treats it as a test pattern and runs everything); pass file paths positionally instead.
+
+Regression: full suite 499 tests pass (pre-existing unrelated failure: `src/views/Options/Prompts.test.js`).
 
 ---
 
-## Step 4: IO Preset Resolution
+## Step 3.5: Escape Codec & Placeholder Unification — 🧭 ESCAPE ENGINE DONE (2026-08-02)
 
-**Modify:** `src/config/api.js`
-**Create:** `src/apis/ioPreset.test.js` (~10 tests)
+> Escape engine, preset extension and render wiring are implemented with tests. Remaining: wire the new fields into `trans.js` (decode-side `denormalize` as `decodeText`, `buildBatchInput` normalize, `buildBatchExample` prompt-note) — recorded as Step 5 wiring. `applyPlaceholders` in `template.js` is implemented and tested.
 
-**IO presets:**
+### Problem
 
-| Preset | Encoder | Decoder |
-|--------|---------|---------|
-| `json` | json | json |
-| `xml` | json | xml |
-| `textlines` | json | textlines |
-| `percent` | percent | percent |
-| `custom` | custom | custom |
+The LLM's output must be parseable by the decoder, but translation content can collide with the output format's structural characters:
 
-**API:**
+| Format | Collision | Example failure |
+|--------|-----------|-----------------|
+| `xml` | content containing `<t>`/`</t>`/`<item>`/`<seg>` | truncated/duplicate segments |
+| `textlines` | content containing literal `<br>` or a raw newline + `digits \|` | duplicate ids, spurious segments |
+| `percent` | content containing `%%` | data loss at split |
+| `json` | (safe — JSON string escaping) | — |
+
+Backslash-escaping cannot protect XML: content `<t>` still contains a literal `<t` that matches `/<(t|item|seg)\b[^>]*>/`. XML **entity escaping** removes the literal `<`, making the tag regex structurally unable to match content.
+
+### `createEscapeCodec(escapes, promptNote?)` engine (`src/libs/aiResponseParser.js`)
+
 ```javascript
-resolveIoPreset(preset) → { encoder: EncoderPreset, decoder: DecoderPreset }
-resolveIoConfig(preset, encoder?, decoder?) → { inputTemplate, ... }
+// escapes: ordered [from, to, reverseTo?] triples; normalize replaces in order,
+// denormalize is ONE regex pass; promptNote appended after Output example.
+createEscapeCodec(escapes, promptNote) → { normalize, denormalize, promptNote }
 ```
+
+### Per-format escape table
+
+| preset | normalize (order sensitive) | denormalize (single pass) | promptNote |
+|--------|------------------------------|---------------------------|------------|
+| `json` | identity | identity | none |
+| `xml` | `&`→`&amp;` first, then `<`→`&lt;`, `>`→`&gt;` | `&amp;`/`&lt;`/`&gt;` | preserve `&lt;` `&gt;` `&amp;` verbatim |
+| `textlines` | `&`→`&amp;` first, then `<br\s*\/?>`→`&lt;br&gt;`, then `\n`→`<br>` | `&amp;`/`&lt;br&gt;` | preserve `&amp;` `&lt;br&gt;`; use `<br>` for newlines |
+| `percent` | `\`→`\\` first, then `%`→`\%` | `\\`/`\%` | preserve `\\` `\%` verbatim |
+
+Decisions locked during review:
+- XML uses the **minimal entity set** `&`, `<`, `>` only. `&quot;`/`&apos;` are unnecessary: quotes only matter inside attributes, which the extension itself generates; escaping them adds noise and fidelity risk.
+- textlines reuses the **entity style** (not backslash `<br\>`): literal `<br>` becomes `&lt;br&gt;` (contains no literal `<br`, so the parser's `<br>`→`\n` step never touches it), and the **newline marker stays a literal `<br>`**. This makes literal `<br>` vs. newline marker distinguishable.
+- `\n`→`<br>` is **folded into textlines normalize** (applies to input `source_text` too), so the model never sees a raw newline + `digits |` and cannot echo a colliding structure. Verified lossless: `foo\n1 | bar` → `foo<br>1 | bar` → model echoes `<br>` → parse → `foo\n1 | bar`.
+- `&`/`\` must be escaped **first** in their formats so literal `&lt;`/`\\` in content round-trip (`&amp;lt;` single-pass → `&lt;`, never `<`).
+- denormalize must be a **single regex pass**; two sequential replaceAll passes would corrupt `&amp;lt;` → `<` / `\\%` → `%`.
+
+### render/parse ordering (parsers unchanged)
+
+- `render*` runs `normalize(text)` **before** `\n`→`<br>` so newline markers stay literal `<br>`.
+- textlines `parse` already does `.replace(/<br\s*\/?>/gi,"\n")` **before** `decodeText` (`aiResponseParser.js:183`), which matches this design without parser changes.
+- XML keeps its documented `<br>`-preserved round-trip asymmetry.
+- Invariant: `denormalize(parse(render(normalize(x)))) === x` (modulo XML's `<br>` convention).
+
+### Placeholder unification (`src/libs/template.js`)
+
+- New `applyPlaceholders(template, vars)` — tolerant `replaceAll` over `{{key}}`. Unlike `renderTemplate`, it never throws on stray `}}`/`{%` (system prompts are user-configurable); unprovided keys are left as-is.
+- Replaces the three duplicated `replaceAll` chains: `genSystemPrompt` (`trans.js:125`), `genUserPrompt` non-batch (`trans.js:215`), `buildSubtitleSystemPrompt` (`trans.js:244`).
+- **normalize scope: `source_text` only.** glossary/title/description are NOT normalized (user-visible term table must stay intact).
+
+### Batch input pipeline (`trans.js`, Step 5 wiring)
+
+```javascript
+const buildBatchInput = (segments, vars, preset) =>
+  renderTemplate(JSON_INPUT_TEMPLATE, {
+    ...vars,
+    segments: segments.map((seg) => ({
+      ...seg,
+      source_text: preset.normalize(String(seg.source_text ?? "")),
+    })),
+  });
+```
+
+- `renderExampleInput()` and `genUserPrompt()` batch branch both call `buildBatchInput` — the normalize application point is unique and visible.
+- `genTransReq` computes `parser = getParserPreset(detectBatchFormat(systemPrompt))` once, feeds both `buildBatchExample` and `genUserPrompt`.
+- `buildBatchExample` appends `parser.promptNote` after `Output:`.
+- Non-batch single-segment mode does **not** normalize (no structured output → no collision).
+
+### Test impact
+
+- **textlines golden unchanged** (`<b>` is not `<br`, and `\n`→`<br>` folding produces the same bytes) — confirmed.
+- **XML golden changes** (applied): sample `一个<b>React</b>组件` → `一个&lt;b&gt;React&lt;/b&gt;组件` in both `aiResponseParser.decoder.test.js` and `trans.example.test.js`.
+- **Example inputs diverge per format** (Step 5 wiring): JSON stays raw `\n`; XML becomes `A &lt;b&gt;React&lt;/b&gt; component.`; textlines becomes `"Line 1<br>Line 2"`. The "all three formats share the same example input" test (`trans.example.test.js:104`) becomes "each format's example input is byte-identical to its own real user message".
+- New tests (implemented): escape engine round-trips, single-pass denormalize (`&amp;lt;` never becomes `<`, `\\\%` preserved), textlines newline folding + literal `<br>` escaping + `<br/>` canonicalization, full `denormalize ∘ parse ∘ render ∘ normalize` pipeline per format, preset exposes `normalize`/`denormalize`/`promptNote`, json identity, `applyPlaceholders` (7 tests in `template.test.js`). Full suite: 518 pass (the `Prompts.test.js` import-mock failure is the pre-existing baseline).
+
+### Streaming gap (resolved in Step 5)
+
+`detectStreamFormat` only distinguishes json vs. non-json, while `parseStreamingSegments` serves both XML and textlines — so the streaming yield boundary cannot select the correct denormalize by format alone. **Resolution**: instead of content-based detection, the batch output format is known once from the system prompt; `handleTranslate` threads `batchFormat` into `handleTranslateStreamInternal`, which injects `getParserPreset(batchFormat).denormalize` into both the JSON and the XML/LINE streaming yields (`parseStreamingSegments` gained a `{ decodeText }` option, applied uniformly). The realtime typewriter parser (cosmetic partial text) intentionally does not denormalize.
+
+---
+
+## Step 4: IO Format Resolution — ✅ DONE (2026-08-02)
+
+> 最终架构（2026-08-02 确认）：**输入/输出格式是「聚合翻译提示词」自带的属性，不是独立的 API 级配置**。
+> - 预定义聚合提示词（`batch-translation-json/xml/line`）各自绑定固定格式组合，编辑器禁用不可改。
+> - 自定义聚合提示词在 Prompt 页编辑器中自由设置 `inputFormat`/`outputFormat`（`inputFormat=custom` 时含自定义模板）。
+> - API 页移除 ioPreset 下拉与覆盖字段；格式随所选聚合提示词（`batchPromptSlug`）由 `resolveApiPromptSettings` 内联到 `apiSetting.ioInputFormat/ioOutputFormat/ioInputTemplate`，二者永不漂移。
+> - 旧 `ioPreset`/`llmInputFormat`/`llmOutputFormat`/`llmInputTemplate` 数据不迁移、作废（默认 json/json 行为不变）。
+
+**预定义聚合提示词固定格式：**
+
+| 提示词 slug | 输入格式 (`inputFormat`) | 输出格式 (`outputFormat`) |
+|-------------|--------------------------|---------------------------|
+| `batch-translation-json` | json | json |
+| `batch-translation-xml` | json | xml |
+| `batch-translation-line` | json | textlines |
+
+**API (config/api.js):**
+```javascript
+inputFormatPresets            // json/percent/plaintext/custom, each { name, inputTemplate, normalize }
+getInputFormatPreset(name, customTemplate) // custom 留空回退 json 模板
+resolveIoPreset(inputFormat, outputFormat, inputTemplate)
+                              // → { inputFormat, outputFormat }; 未知 inputFormat 回退 json
+```
+
+**Input format templates:** percent 复用 `percentCodec.normalize` 保护 `%`/`\`；json 保持上游逐字节结构（从 trans.js 原样移入）；plaintext/custom 为 identity。
+
+**Decode 接线（trans.js `parseAIRes`）:** 显式指定 parser 时先走 `parser.parse()`，无结果回落到通用 dispatcher `parseCompleteTranslationSegments`（仅覆盖 json/xml/textlines）——支持 percent 输出解码，同时保留"提示词与响应格式不一致"旧路径的 JSON→XML→LINE 兜底。
 
 **Verify:** `npm test -- --runTestsByPath src/apis/ioPreset.test.js`
 
@@ -149,7 +310,15 @@ resolveIoConfig(preset, encoder?, decoder?) → { inputTemplate, ... }
 
 ## Step 5: Wire Up in trans.js
 
-**Modify:** `src/apis/trans.js`
+**Modify:** `src/apis/trans.js` (+ `src/libs/stream.js`)
+
+> 🧭 DONE (2026-08-02). The final wiring differs from the 5a-5e sketch below (which assumed `resolveIoPreset`/encoder presets from Step 4). Actual implementation keeps the byte-identical JSON input template and adds:
+> - `buildBatchInput(segments, vars, preset)` — shared by `renderExampleInput` and the batch `genUserPrompt`; applies `preset.normalize` to `source_text` only. JSON → identity, XML → `&lt;b&gt;`, textlines → `\n`→`<br>`.
+> - `buildBatchExample` appends `parser.promptNote` after `Output:`.
+> - `genTransReq` computes `batchParser = getParserPreset(detectBatchFormat(baseSystemPrompt))` once, feeds `buildBatchExample` and `genUserPrompt`.
+> - `parseAIRes(raw, useBatchFetch, parser)` applies `parser.denormalize` uniformly **after** structural parse (no double decode: `<br>`→`\n` folds inside the LINE parser first). `parseTransRes` derives the parser from `systemPrompt`.
+> - Streaming: `parseStreamingSegments(content, processedIds, { decodeText })` applies decodeText uniformly; `handleTranslateStreamInternal` injects the batch format's denormalize into JSON + XML/LINE yields.
+> - The three replaceAll chains (`genSystemPrompt`, non-batch `genUserPrompt`, `buildSubtitleSystemPrompt`) now use `applyPlaceholders`.
 
 ### 5a. Replace `genUserPrompt()` hardcoded JSON
 
@@ -314,17 +483,17 @@ if (API_SPE_TYPES.ai.has(apiType)) {
 
 ## Step 6: Config Schema & Migration
 
-**Modify:** `src/config/api.js`
+**Modify:** `src/config/api.js`, `src/config/prompt.js`
 
-### New config fields per API:
+### New config fields (batch system prompt):
 
 ```javascript
+// 每个聚合翻译提示词（config/prompt.js）携带输入/输出格式：
 {
-  // New fields
-  ioPreset: "json" | "xml" | "textlines" | "percent" | "custom",
-  llmEncoder: "json" | "percent" | "plaintext" | "custom",
-  llmDecoder: "json" | "xml" | "textlines" | "percent" | "custom",
-  llmInputTemplate: "...",  // only when encoder is "custom"
+  // New fields on batch prompts
+  inputFormat: "json" | "percent" | "plaintext" | "custom",
+  outputFormat: "json" | "xml" | "textlines" | "percent",
+  inputTemplate: "...",  // only when inputFormat === "custom"
 
   // Existing (kept)
   translationRules: "...",
@@ -332,17 +501,18 @@ if (API_SPE_TYPES.ai.has(apiType)) {
 }
 ```
 
-### Migration function:
+### Runtime resolution (config/prompt.js `resolveApiPromptSettings`)
 
+解析 `batchPromptSlug` 后将提示词携带的格式内联到 `apiSetting`：
 ```javascript
-export const migrateUpstreamApi = (api) => ({
-  ...api,
-  ioPreset: api.ioPreset || "json",
-  llmEncoder: api.llmEncoder || "json",
-  llmDecoder: api.llmDecoder || "json",
-  translationRules: api.translationRules || defaultSystemPrompt,
-});
+nextApiSetting.ioInputFormat = batchPrompt.inputFormat || "json";
+nextApiSetting.ioOutputFormat = batchPrompt.outputFormat || "json";
+nextApiSetting.ioInputTemplate = batchPrompt.inputTemplate || "";
 ```
+
+### Migration
+
+无迁移。旧的 API 级 `ioPreset`/`llmInputFormat`/`llmOutputFormat`/`llmInputTemplate` 字段作废，读取时忽略；默认聚合提示词为 `batch-translation-json`（json/json），行为与旧默认一致。
 
 ---
 
@@ -601,29 +771,41 @@ const DIALOGUE_SEGMENTS = [
 
 ## Execution Order
 
-| Step | Files Created/Modified | Tests | Depends On |
-|------|----------------------|-------|------------|
-| 1 | `libs/template.js`, `libs/template.test.js` | ~30 (7 categories × variable scenarios) | Nothing |
-| 2 | `config/api.js`, `apis/encoder.test.js` | ~25 (7 categories × edge cases) | Step 1 |
-| 3 | `config/api.js`, `apis/decoder.test.js` | ~30 (7 categories × parse scenarios) | Nothing |
-| 4 | `config/api.js`, `apis/ioPreset.test.js` | ~15 (cross-category presets) | Steps 2,3 |
-| 5 | `apis/trans.js` | All existing + new | Steps 1-4 |
-| 6 | `config/api.js` | Migration tests | Step 5 |
-| 7 | `apis/trans.manual.test.js`, config JSON | 24 E2E × 7 categories | Step 5 |
+| Step | Files Created/Modified | Tests | Depends On | Status |
+|------|----------------------|-------|------------|--------|
+| 1 | `libs/template.js`, `libs/template.test.js` | ~30 (7 categories × variable scenarios) | Nothing | ✅ Done (53 tests, +7 userPrompt regression) |
+| 1.5 | `config/api.js`, `apis/trans.js`, `apis/trans.example.test.js` | 8 | Step 1 | ✅ Done |
+| 2 | `config/api.js`, `apis/encoder.test.js` | ~25 (7 categories × edge cases) | Step 1 | ✅ Done (registry merged into `config/api.js`; tests in `ioPreset.test.js`) |
+| 3 | `libs/aiResponseParser.js`, `apis/trans.js`, `libs/aiResponseParser.decoder.test.js` | 21 | Nothing | ✅ Done (+ output example auto-generation) |
+| 3.5 | `libs/template.js` (+`applyPlaceholders`), `libs/aiResponseParser.js` (escape codec) | ~+14 (escape + placeholder) | Step 3 | ✅ Done (escape engine + tests) |
+| 4 | `config/api.js`, `apis/ioPreset.test.js` | ~15 (cross-category presets) | Steps 2,3 | ✅ Done (输入/输出格式为批处理提示词属性；resolveIoPreset(inputFormat, outputFormat, inputTemplate)) |
+| 5 | `apis/trans.js`, `libs/stream.js` | All existing + new | Steps 1-4 | ✅ Done (3.5 wiring: applyPlaceholders, buildBatchInput, promptNote, denormalize decode, streaming) |
+| 6 | `config/api.js`, `config/prompt.js` | Migration tests | Step 5 | ✅ Done (批处理提示词携带 inputFormat/outputFormat/inputTemplate；无迁移，旧 io 字段作废) |
+| 7 | `apis/trans.manual.test.js`, config JSON | 24 E2E × 7 categories | Step 5 | ⏳ Not started |
 
 ## File Summary
 
-| File | Action | Step |
-|------|--------|------|
-| `src/libs/template.js` | CREATE | 1 |
-| `src/libs/template.test.js` | CREATE | 1 |
-| `src/config/api.js` | MODIFY | 2,3,4,6 |
-| `src/apis/encoder.test.js` | CREATE | 2 |
-| `src/apis/decoder.test.js` | CREATE | 3 |
-| `src/apis/ioPreset.test.js` | CREATE | 4 |
-| `src/apis/trans.js` | MODIFY | 5 |
-| `src/apis/trans.manual.test.js` | CREATE | 7 |
-| `src/scripts/manual-e2e-ollama.config.json` | CREATE | 7 |
+| File | Action | Step | Status |
+|------|--------|------|--------|
+| `src/libs/template.js` | CREATE (+`applyPlaceholders` in 3.5) | 1, 3.5 | ✅ Done (applyPlaceholders added) |
+| `src/libs/template.test.js` | CREATE (+7 applyPlaceholders tests) | 1, 3.5 | ✅ Done |
+| `src/apis/trans.userPrompt.test.js` | CREATE | 1 (added) | ✅ Done |
+| `src/apis/trans.example.test.js` | CREATE | 1.5 | ✅ Done |
+| `src/config/api.js` | MODIFY | 2,3,4,6 | ✅ Done (inputFormatPresets + resolveIoPreset(inputFormat, outputFormat, inputTemplate) + 批处理提示词格式字段；1.5 example strip in；IO_PRESET_TABLE 与 defaultApi 4 io 字段已删) |
+| `src/libs/aiResponseParser.js` | MODIFY | 3, 3.5 | ✅ Step 3 done; escape codec + preset normalize/denormalize/promptNote done |
+| `src/libs/aiResponseParser.decoder.test.js` | CREATE | 3 | ✅ Done |
+| `src/apis/encoder.test.js` | CREATE | 2 | ⏳ Superseded (tests merged into `ioPreset.test.js`) |
+| `src/apis/decoder.test.js` | CREATE | 3 | ⏳ Superseded (tests live in `src/libs/aiResponseParser.decoder.test.js`) |
+| `src/apis/ioPreset.test.js` | CREATE | 4 | ✅ Done (resolveIoPreset 新签名 + getInputFormatPreset；默认 json/json) |
+| `src/apis/trans.js` | MODIFY | 5 | ✅ Done: applyPlaceholders ×3, buildBatchInput, promptNote append, per-preset denormalize decode (non-stream + stream), batchParser threading; Step 4: 格式读取 apiSetting.ioInputFormat/ioOutputFormat/ioInputTemplate（由 resolveApiPromptSettings 内联），genTransReq/parseTransRes/handleTranslate 经 resolveIoPreset；detectBatchFormat 已删除 |
+| `src/libs/stream.js` | MODIFY | 5 | ✅ Done: `parseStreamingSegments` accepts `{ decodeText }`, uniform denormalize |
+| `src/apis/trans.example.test.js` | MODIFY | 1.5, 5, 4 | ✅ Done (per-format example inputs + decode wiring tests + 格式接线: xml/percent/custom/overrides) |
+| `src/views/Options/Apis.js` | MODIFY | 4 | ✅ Done (ioPreset UI 块与 llmInput* 覆盖字段已删；格式随所选聚合提示词) |
+| `src/views/Options/Apis.test.js` | MODIFY | 4 | ✅ Done (ioPreset UI 测试移除，断言不再渲染) |
+| `src/views/Options/Prompts.js` | MODIFY | 4 | ✅ Done (批处理提示词编辑器增加 输入/输出格式 select + custom 模板框；预定义禁用) |
+| `src/config/prompt.js` | MODIFY | 4,6 | ✅ Done (normalizePrompt/STORAGE_FIELDS 新字段 + PRESET_PROMPTS 固定格式 + resolveApiPromptSettings 内联 ioInputFormat/ioOutputFormat/ioInputTemplate) |
+| `src/apis/trans.manual.test.js` | CREATE | 7 | ⏳ Pending |
+| `src/scripts/manual-e2e-ollama.config.json` | CREATE | 7 | ⏳ Pending |
 
 ## Risk Mitigation
 
