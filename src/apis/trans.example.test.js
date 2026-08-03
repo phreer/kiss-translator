@@ -15,7 +15,7 @@ jest.mock("../libs/docInfo", () => ({
   getDocInfo: () => ({}),
 }));
 
-import { genTransReq, parseTransRes } from "./trans";
+import { genTransReq, parseTransRes, renderBatchExample } from "./trans";
 import {
   defaultSystemPrompt,
   defaultSystemPromptXml,
@@ -47,7 +47,13 @@ const EXAMPLE_OUTPUT_XML =
 
 const EXAMPLE_OUTPUT_LINE = "0 | 一个<b>React</b>组件\n1 | 第一行<br>第二行";
 
-const renderSystemPrompt = async ({ systemPrompt, useBatchFetch = true }) => {
+const renderSystemPrompt = async ({
+  systemPrompt,
+  useBatchFetch = true,
+  ioInputFormat,
+  ioOutputFormat,
+  ioInputTemplate,
+}) => {
   const [, init] = await genTransReq({
     apiType: OPT_TRANS_OPENAI,
     url: "https://api.openai.com/v1/chat/completions",
@@ -55,6 +61,9 @@ const renderSystemPrompt = async ({ systemPrompt, useBatchFetch = true }) => {
     model: "test-model",
     systemPrompt,
     useBatchFetch,
+    ioInputFormat,
+    ioOutputFormat,
+    ioInputTemplate,
     from: "en",
     to: "zh",
     fromLang: "English",
@@ -95,18 +104,20 @@ describe("batch system prompt example", () => {
     );
   });
 
-  test("XML prompt appends unified example with XML output and escape note", async () => {
+  test("XML prompt with ioOutputFormat xml appends unified XML example and escape note", async () => {
     const content = await renderSystemPrompt({
       systemPrompt: defaultSystemPromptXml,
+      ioOutputFormat: "xml",
     });
     expect(content).toBe(
       `${defaultSystemPromptXml}\n\nExample:\nInput: ${EXAMPLE_INPUT_XML}\nOutput: ${EXAMPLE_OUTPUT_XML}\n${XML_PROMPT_NOTE}`
     );
   });
 
-  test("LINE prompt appends unified example with line output and escape note", async () => {
+  test("LINE prompt with ioOutputFormat textlines appends unified line example and escape note", async () => {
     const content = await renderSystemPrompt({
       systemPrompt: defaultSystemPromptLines,
+      ioOutputFormat: "textlines",
     });
     expect(content).toBe(
       `${defaultSystemPromptLines}\n\nExample:\nInput: ${EXAMPLE_INPUT_LINE}\nOutput: ${EXAMPLE_OUTPUT_LINE}\n${LINES_PROMPT_NOTE}`
@@ -114,12 +125,15 @@ describe("batch system prompt example", () => {
   });
 
   test("each format's example input is byte-identical to its own real user message", async () => {
-    for (const [systemPrompt, expectedInput] of [
-      [defaultSystemPrompt, EXAMPLE_INPUT],
-      [defaultSystemPromptXml, EXAMPLE_INPUT_XML],
-      [defaultSystemPromptLines, EXAMPLE_INPUT_LINE],
+    for (const [systemPrompt, ioOutputFormat, expectedInput] of [
+      [defaultSystemPrompt, "json", EXAMPLE_INPUT],
+      [defaultSystemPromptXml, "xml", EXAMPLE_INPUT_XML],
+      [defaultSystemPromptLines, "textlines", EXAMPLE_INPUT_LINE],
     ]) {
-      const content = await renderSystemPrompt({ systemPrompt });
+      const content = await renderSystemPrompt({
+        systemPrompt,
+        ioOutputFormat,
+      });
       expect(content).toContain(`Example:\nInput: ${expectedInput}`);
 
       const [, , userMsg] = await genTransReq({
@@ -129,6 +143,7 @@ describe("batch system prompt example", () => {
         model: "test-model",
         systemPrompt,
         useBatchFetch: true,
+        ioOutputFormat,
         from: "en",
         to: "zh",
         fromLang: "English",
@@ -141,7 +156,7 @@ describe("batch system prompt example", () => {
     }
   });
 
-  test("custom prompt without format markers falls back to JSON example", async () => {
+  test("default format produces a JSON example for an unmarked prompt", async () => {
     const content = await renderSystemPrompt({
       systemPrompt: "Custom batch rules only.",
     });
@@ -180,23 +195,25 @@ describe("batch system prompt example", () => {
   });
 });
 
-// 批量解码侧：按系统提示词判定输出格式，并把对应 preset 的 denormalize 注入 parseAIRes。
-describe("batch decode (denormalize wiring)", () => {
-  const makeResponse = (content) => ({
-    choices: [{ message: { role: "assistant", content } }],
+const makeResponse = (content) => ({
+  choices: [{ message: { role: "assistant", content } }],
+});
+
+// 批量解码侧：输出格式由所选批处理提示词（ioOutputFormat）显式指定，并把对应 preset 的 denormalize 注入 parseAIRes。
+const parseOpenAI = (content, systemPrompt, ioOutputFormat) =>
+  parseTransRes(makeResponse(content), {
+    apiType: OPT_TRANS_OPENAI,
+    useBatchFetch: true,
+    systemPrompt,
+    ioOutputFormat,
   });
 
-  const parseOpenAI = (content, systemPrompt) =>
-    parseTransRes(makeResponse(content), {
-      apiType: OPT_TRANS_OPENAI,
-      useBatchFetch: true,
-      systemPrompt,
-    });
-
+describe("batch decode (denormalize wiring)", () => {
   test("XML batch decodes escaped entities back to rich text", async () => {
     const result = await parseOpenAI(
       '<root>\n    <t id="0" sourceLanguage="en">一个&lt;b&gt;React&lt;/b&gt;组件</t>\n</root>',
-      defaultSystemPromptXml
+      defaultSystemPromptXml,
+      "xml"
     );
     expect(result).toEqual([["一个<b>React</b>组件", "en"]]);
   });
@@ -204,7 +221,8 @@ describe("batch decode (denormalize wiring)", () => {
   test("XML batch keeps &amp;lt; as a literal single-pass restore", async () => {
     const result = await parseOpenAI(
       '<root><t id="0" sourceLanguage="en">&amp;lt;br&amp;gt;</t></root>',
-      defaultSystemPromptXml
+      defaultSystemPromptXml,
+      "xml"
     );
     expect(result).toEqual([["&lt;br&gt;", "en"]]);
   });
@@ -212,7 +230,8 @@ describe("batch decode (denormalize wiring)", () => {
   test("LINE batch folds <br> to newlines and denormalizes literal <br>", async () => {
     const result = await parseOpenAI(
       "0 | 第一行<br>第二行\n1 | a &lt;br&gt; b",
-      defaultSystemPromptLines
+      defaultSystemPromptLines,
+      "textlines"
     );
     expect(result).toEqual([
       ["第一行\n第二行", ""],
@@ -231,8 +250,199 @@ describe("batch decode (denormalize wiring)", () => {
   test("plain-text fallback still decodes per preset", async () => {
     const result = await parseOpenAI(
       "一个&lt;b&gt;React&lt;/b&gt;组件",
-      defaultSystemPromptXml
+      defaultSystemPromptXml,
+      "xml"
     );
     expect(result).toEqual([["一个<b>React</b>组件", ""]]);
+  });
+});
+
+// 输入/输出格式接线：格式由所选批处理提示词决定（ioInputFormat/ioOutputFormat/ioInputTemplate），
+// 不再依赖系统提示词特征；示例、user message 与解码侧共用同一份格式。
+describe("io format wiring", () => {
+  test("ioOutputFormat xml forces XML output example even for a JSON prompt", async () => {
+    const content = await renderSystemPrompt({
+      systemPrompt: defaultSystemPrompt,
+      ioOutputFormat: "xml",
+    });
+    expect(content).toBe(
+      `${defaultSystemPrompt}\n\nExample:\nInput: ${EXAMPLE_INPUT_XML}\nOutput: ${EXAMPLE_OUTPUT_XML}\n${XML_PROMPT_NOTE}`
+    );
+  });
+
+  test("ioOutputFormat xml decodes XML entities from a JSON prompt", async () => {
+    const result = await parseOpenAI(
+      '<root><t id="0" sourceLanguage="en">一个&lt;b&gt;React&lt;/b&gt;组件</t></root>',
+      defaultSystemPrompt,
+      "xml"
+    );
+    expect(result).toEqual([["一个<b>React</b>组件", "en"]]);
+  });
+
+  test("ioInputFormat and ioOutputFormat are independent", async () => {
+    const content = await renderSystemPrompt({
+      systemPrompt: defaultSystemPrompt,
+      ioInputFormat: "percent",
+      ioOutputFormat: "json",
+    });
+    expect(content).toContain("\nSegments:\n[0]");
+    expect(content).toContain(`Output: ${EXAMPLE_OUTPUT_JSON}`);
+  });
+
+  test("ioInputFormat percent keeps example input byte-identical to a real user message", async () => {
+    const content = await renderSystemPrompt({
+      systemPrompt: defaultSystemPrompt,
+      ioInputFormat: "percent",
+      ioOutputFormat: "percent",
+    });
+    const exampleInput = content.slice(
+      content.indexOf("Input: ") + 7,
+      content.indexOf("\nOutput: ")
+    );
+    const [, , userMsg] = await genTransReq({
+      apiType: OPT_TRANS_OPENAI,
+      url: "https://api.openai.com/v1/chat/completions",
+      key: "test-key",
+      model: "test-model",
+      systemPrompt: defaultSystemPrompt,
+      useBatchFetch: true,
+      ioInputFormat: "percent",
+      ioOutputFormat: "percent",
+      from: "en",
+      to: "zh",
+      fromLang: "English",
+      toLang: "zh-CN",
+      texts: ["A <b>React</b> component.", "Line 1\nLine 2"],
+      glossary: { component: "组件", React: "" },
+      docInfo: { title: "", description: "" },
+    });
+    expect(userMsg.content).toBe(exampleInput);
+    expect(userMsg.content).toMatch(/^Target Language: zh-CN\nGlossary:\n/);
+    expect(userMsg.content).toContain("\nSegments:\n[0]");
+    expect(userMsg.content).toContain("\n%%\n[1]");
+  });
+
+  test("ioInputFormat percent escapes % and backslash once (no double escape)", async () => {
+    const [, , userMsg] = await genTransReq({
+      apiType: OPT_TRANS_OPENAI,
+      url: "https://api.openai.com/v1/chat/completions",
+      key: "test-key",
+      model: "test-model",
+      systemPrompt: defaultSystemPrompt,
+      useBatchFetch: true,
+      ioInputFormat: "percent",
+      ioOutputFormat: "percent",
+      from: "en",
+      to: "zh",
+      fromLang: "English",
+      toLang: "zh-CN",
+      texts: ["50% off", "a\\b"],
+      glossary: {},
+      docInfo: { title: "", description: "" },
+    });
+    expect(userMsg.content).toContain("[0]\n50\\% off");
+    expect(userMsg.content).toContain("[1]\na\\\\b");
+  });
+
+  test("ioOutputFormat percent decodes escaped output back to plain text", async () => {
+    const result = await parseOpenAI(
+      "[0]\n50\\% off\n%%\n[1]\nHello",
+      defaultSystemPrompt,
+      "percent"
+    );
+    expect(result).toEqual([
+      ["50% off", ""],
+      ["Hello", ""],
+    ]);
+  });
+
+  test("ioInputFormat custom uses the custom input template", async () => {
+    const [, , userMsg] = await genTransReq({
+      apiType: OPT_TRANS_OPENAI,
+      url: "https://api.openai.com/v1/chat/completions",
+      key: "test-key",
+      model: "test-model",
+      systemPrompt: defaultSystemPrompt,
+      useBatchFetch: true,
+      ioInputFormat: "custom",
+      ioInputTemplate:
+        "Translate: {{to_lang|raw}}|{% for s in segments %}{{s.id}}:{{s.source_text|raw}};{% endfor %}",
+      from: "en",
+      to: "zh",
+      fromLang: "English",
+      toLang: "zh-CN",
+      texts: ["A <b>React</b> component.", "Line 1\nLine 2"],
+      glossary: {},
+      docInfo: { title: "", description: "" },
+    });
+    expect(userMsg.content).toBe(
+      "Translate: zh-CN|0:A <b>React</b> component.;1:Line 1\nLine 2;"
+    );
+  });
+
+  test("ioInputFormat custom falls back to json template when template is empty", async () => {
+    const content = await renderSystemPrompt({
+      systemPrompt: defaultSystemPrompt,
+      ioInputFormat: "custom",
+    });
+    expect(content).toContain(`Example:\nInput: ${EXAMPLE_INPUT}`);
+  });
+});
+
+// UI 预览（Prompts 页只读框）与运行时追加的示例逐字节一致：renderBatchExample
+// 走与 genTransReq 相同的 resolveIoPreset + buildBatchExample 路径。
+describe("renderBatchExample (UI preview)", () => {
+  test("default json/json preview matches the appended JSON example", () => {
+    expect(renderBatchExample()).toBe(
+      `Example:\nInput: ${EXAMPLE_INPUT}\nOutput: ${EXAMPLE_OUTPUT_JSON}`
+    );
+  });
+
+  test("preview is byte-identical to the runtime-appended example", async () => {
+    for (const [ioOutputFormat, expectedSuffix] of [
+      ["xml", `Example:\nInput: ${EXAMPLE_INPUT_XML}\nOutput: ${EXAMPLE_OUTPUT_XML}\n${XML_PROMPT_NOTE}`],
+      ["textlines", `Example:\nInput: ${EXAMPLE_INPUT_LINE}\nOutput: ${EXAMPLE_OUTPUT_LINE}\n${LINES_PROMPT_NOTE}`],
+    ]) {
+      const content = await renderSystemPrompt({
+        systemPrompt: defaultSystemPrompt,
+        ioOutputFormat,
+      });
+      expect(content).toBe(
+        `${defaultSystemPrompt}\n\n${renderBatchExample("json", ioOutputFormat)}`
+      );
+      expect(renderBatchExample("json", ioOutputFormat)).toBe(expectedSuffix);
+    }
+  });
+
+  test("percent preview matches the runtime appended example", async () => {
+    const content = await renderSystemPrompt({
+      systemPrompt: defaultSystemPrompt,
+      ioInputFormat: "percent",
+      ioOutputFormat: "percent",
+    });
+    expect(content).toBe(
+      `${defaultSystemPrompt}\n\n${renderBatchExample("percent", "percent")}`
+    );
+  });
+
+  test("custom template preview renders with the custom input template", () => {
+    expect(
+      renderBatchExample(
+        "custom",
+        "json",
+        "Translate: {{to_lang|raw}}|{% for s in segments %}{{s.id}}:{{s.source_text|raw}};{% endfor %}"
+      )
+    ).toBe(
+      `Example:\nInput: Translate: zh-CN|0:A <b>React</b> component.;1:Line 1\nLine 2;\nOutput: ${EXAMPLE_OUTPUT_JSON}`
+    );
+  });
+
+  test("unknown or empty formats fall back to json/json", () => {
+    expect(renderBatchExample("", "")).toBe(
+      `Example:\nInput: ${EXAMPLE_INPUT}\nOutput: ${EXAMPLE_OUTPUT_JSON}`
+    );
+    expect(renderBatchExample("bogus", "bogus")).toBe(
+      `Example:\nInput: ${EXAMPLE_INPUT}\nOutput: ${EXAMPLE_OUTPUT_JSON}`
+    );
   });
 });

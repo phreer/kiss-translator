@@ -1030,6 +1030,10 @@ function ApiFields({ apiSlug, deleteApi, copyApi, onCollapse }) {
                 value={selectedBatchPromptSlug}
                 label={i18n("batch_prompt", "聚合翻译提示词")}
                 onChange={handlePromptChange}
+                helperText={i18n(
+                  "batch_prompt_helper",
+                  "批量翻译输入/输出格式由所选提示词决定，可在提示词管理页面配置"
+                )}
               >
                 {batchPromptOptions.map((prompt) => (
                   <MenuItem key={prompt.slug} value={prompt.slug}>

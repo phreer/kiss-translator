@@ -3,6 +3,8 @@
  * @description 翻译 API 配置模块，定义各类翻译引擎和词典的默认请求参数、模型名称、语言映射以及 AI 翻译提示词模版。
  */
 
+import { getParserPreset } from "../libs/aiResponseParser";
+
 // --- 基础请求控制参数 ---
 export const DEFAULT_HTTP_TIMEOUT = 30; // 调用超时时间 (单位：秒)
 export const DEFAULT_FETCH_LIMIT = 10; // 默认最大并行请求/任务数量
@@ -598,12 +600,6 @@ Translated Text:`;
 
 export const defaultSystemPrompt = `Act as a translation API. Output a single raw JSON object only. No extra text or fences.
 
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output:
-{"translations":[{"id":1,"text":"...","sourceLanguage":"<detected>"}]}
-
 Rules:
 1.  Use title/description for context only; do not output them.
 2.  Keep id, order, and count of segments.
@@ -618,15 +614,6 @@ Fail-safe: On any error, return {"translations":[]}.`;
 
 export const defaultSystemPromptXml = `Act as a translation API. Output raw XML-like format only. No Markdown fences (xml). No conversational filler.
 
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output Format:
-<root>
-    <t id="0" sourceLanguage="<detected_source_lang>">Translated text content...</t>
-    <t id="1" sourceLanguage="<detected_source_lang>">Translated text content...</t>
-</root>
-
 Rules:
 1.  **Strict Format**: Output ONLY the <root> element and its children. Do not include "xml" version declarations or markdown code blocks.
 2.  **Structure**: Maintain the exact "id" from the input in the "id" attribute. Detect the source language for the "sourceLanguage" attribute.
@@ -637,14 +624,6 @@ Rules:
 7.  **Tone**: Apply the specified "tone" (formal/casual).`;
 
 export const defaultSystemPromptLines = `Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown. No conversational filler.
-
-Input:
-{"targetLanguage":"<lang>","title":"<context>","description":"<context>","summary":"<context>","segments":[{"id":1,"text":"..."}],"glossary":{"sourceTerm":"targetTerm"},"tone":"<formal|casual>"}
-
-Output Format:
-<id> | <Translation for Segment>
-<id> | <Translation for Segment>
-...
 
 Rules:
 1.  **Strict Format**: Output exactly one line per segment using the format: "{id} | {translated_text}".
@@ -1001,6 +980,86 @@ export const DEFAULT_API_LIST = OPT_ALL_TRANS_TYPES.map((apiType) => ({
   apiName: apiType,
   apiType,
 }));
+
+// --- 聚合翻译输入格式 ---
+// 输入格式描述"发给模型的 user message"如何生成：inputTemplate 用模板引擎渲染，
+// normalize 保护段文本中的结构字符（如 percent 的 %）。输出格式复用 aiResponseParser
+// 的 parserPresets（json/xml/textlines/percent），输入/输出格式由所选批处理提示词携带。
+
+// 聚合翻译输入模板：与上游硬编码的 JSON 结构保持逐字节一致。
+// 单行书写以消除模板空白，`|json` 过滤器沿用 JSON.stringify 的转义语义。
+const JSON_INPUT_TEMPLATE =
+  '{"targetLanguage":{{to_lang|json}},"segments":[{% for seg in segments %}{"id":{{seg.id}},"text":{{seg.source_text|json}}}{% if not loop.last %},{% endif %}{% endfor %}]{% if title %},"title":{{title|json}}{% endif %}{% if description %},"description":{{description|json}}{% endif %}{% if has_glossary %},"glossary":{{glossary|json}}{% endif %}{% if tone %},"tone":{{tone|json}}{% endif %}}';
+
+const identityNormalize = (value) => String(value ?? "");
+
+const PERCENT_INPUT_TEMPLATE = `Target Language: {{to_lang|raw}}
+{% if title %}Title: {{title|raw}}
+{% endif %}{% if description %}Description: {{description|raw}}
+{% endif %}{% if has_glossary %}Glossary:
+{{glossary_lines|raw}}
+{% endif %}{% if tone %}Tone: {{tone|raw}}
+{% endif %}Segments:
+{% for seg in segments %}[{{seg.id}}]
+{{seg.source_text|raw}}{% if not loop.last %}
+
+%%
+{% endif %}{% endfor %}`;
+
+const PLAINTEXT_INPUT_TEMPLATE = `Translate to {{to_lang|raw}}:
+{% for seg in segments %}{{seg.source_text|raw}}{% if not loop.last %}
+
+{% endif %}{% endfor %}`;
+
+// 输入格式注册表：json 保持上游逐字节结构；percent 提供结构化分隔符，
+// 其 normalize 复用 percent 输出解析器的转义，保证 %/ 原文不被误当结构字符。
+export const inputFormatPresets = {
+  json: {
+    name: "json",
+    inputTemplate: JSON_INPUT_TEMPLATE,
+    normalize: identityNormalize,
+  },
+  percent: {
+    name: "percent",
+    inputTemplate: PERCENT_INPUT_TEMPLATE,
+    normalize: getParserPreset("percent").normalize,
+  },
+  plaintext: {
+    name: "plaintext",
+    inputTemplate: PLAINTEXT_INPUT_TEMPLATE,
+    normalize: identityNormalize,
+  },
+  custom: {
+    name: "custom",
+    inputTemplate: "",
+    normalize: identityNormalize,
+  },
+};
+
+// 获取输入格式预设；未知名称回退 json。custom 需要显式模板，
+// 为空时回退 json 模板，避免产生空 user message。
+export const getInputFormatPreset = (name, customTemplate = "") => {
+  const preset = inputFormatPresets[name] || inputFormatPresets.json;
+  if (name === "custom") {
+    return {
+      ...preset,
+      inputTemplate: customTemplate || JSON_INPUT_TEMPLATE,
+    };
+  }
+  return preset;
+};
+
+// 聚合输入/输出格式由所选批处理提示词（config/prompt.js）携带，
+// 运行时经 resolveApiPromptSettings 内联为 apiSetting.ioInputFormat/ioOutputFormat/ioInputTemplate。
+// 这里仅负责把格式名解析为具体的输入/输出预设。
+export const resolveIoPreset = (
+  inputFormat = "json",
+  outputFormat = "json",
+  inputTemplate = ""
+) => ({
+  inputFormat: getInputFormatPreset(inputFormat, inputTemplate),
+  outputFormat: getParserPreset(outputFormat),
+});
 
 /**
  * 为单个翻译接口补齐模型列表 URL。

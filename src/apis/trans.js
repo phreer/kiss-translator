@@ -38,6 +38,8 @@ import {
   defaultSystemPromptXml,
   defaultSystemPromptLines,
   THINKING_PARAM_MAP,
+  resolveIoPreset,
+  getInputFormatPreset,
 } from "../config";
 import { msAuth } from "../libs/auth";
 import { genDeeplFree } from "./deepl";
@@ -53,7 +55,6 @@ import { decodeHTMLEntities } from "../libs/html";
 import {
   parseCompleteTranslationSegments,
   getParserPreset,
-  parserPresets,
 } from "../libs/aiResponseParser";
 import { renderTemplate, applyPlaceholders } from "../libs/template";
 import {
@@ -125,11 +126,6 @@ const genSystemPrompt = ({
     text: texts[0],
   });
 
-// 批量翻译输入模板：与上游硬编码的 JSON 结构保持逐字节一致。
-// 单行书写以消除模板空白，`|json` 过滤器沿用 JSON.stringify 的转义语义。
-const JSON_INPUT_TEMPLATE =
-  '{"targetLanguage":{{to_lang|json}},"segments":[{% for seg in segments %}{"id":{{seg.id}},"text":{{seg.source_text|json}}}{% if not loop.last %},{% endif %}{% endfor %}]{% if title %},"title":{{title|json}}{% endif %}{% if description %},"description":{{description|json}}{% endif %}{% if has_glossary %},"glossary":{{glossary|json}}{% endif %}{% if tone %},"tone":{{tone|json}}{% endif %}}';
-
 // 统一示例上下文：与真实批量 user message 走同一模板渲染，保证格式逐字节同构。
 const EXAMPLE_TARGET_LANG = "zh-CN";
 const EXAMPLE_SEGMENTS = [
@@ -146,23 +142,37 @@ const SAMPLE_TRANSLATIONS = [
 ];
 
 // 批量用户消息的统一渲染入口：真实请求与 Output example 走同一模板与同一转义，
-// 保证 "示例输入 == 真实输入" 逐字节成立。preset.normalize 只作用于 source_text，
-// 让含有 <b>/&/<br> 等结构冲突字符的原文在示例与真实消息中表现一致。
+// 保证 "system prompt 示例输入 == 真实输入"。source_text 先经 inputFormat.normalize
+// 保护输入结构字符，再经 outputFormat.normalize 预热输出
 const buildBatchInput = (
   segments,
   vars,
-  preset = parserPresets.json
-) =>
-  renderTemplate(JSON_INPUT_TEMPLATE, {
+  inputFormat = getInputFormatPreset("json"),
+  outputFormat = getParserPreset("json")
+) => {
+  const glossaryLines = Object.entries(vars.glossary || {})
+    .map(([term, definition]) => `${term}: ${definition}`)
+    .join("\n");
+  return renderTemplate(inputFormat.inputTemplate, {
     ...vars,
-    segments: segments.map((seg) => ({
-      id: seg.id,
-      source_text: preset.normalize(String(seg.source_text ?? "")),
-    })),
+    glossary_lines: glossaryLines,
+    segments: segments.map((seg) => {
+      const encoded = inputFormat.normalize(String(seg.source_text ?? ""));
+      const source_text =
+        inputFormat.name === "percent" && outputFormat.name === "percent"
+          ? encoded
+          : outputFormat.normalize(encoded);
+      return { id: seg.id, source_text };
+    }),
   });
+};
 
-const renderExampleInput = (preset = parserPresets.json) =>
-  buildBatchInput(
+const buildBatchExample = (
+  inputFormat = getInputFormatPreset("json"),
+  outputFormat = getParserPreset("json")
+) => {
+  const output_example = outputFormat.render(SAMPLE_TRANSLATIONS);
+  const input_example = buildBatchInput(
     EXAMPLE_SEGMENTS,
     {
       to_lang: EXAMPLE_TARGET_LANG,
@@ -172,24 +182,26 @@ const renderExampleInput = (preset = parserPresets.json) =>
       has_glossary: Object.keys(EXAMPLE_GLOSSARY).length !== 0,
       tone: "",
     },
-    preset
+    inputFormat,
+    outputFormat
   );
-
-const detectBatchFormat = (systemPrompt) => {
-  if (/<root>/i.test(systemPrompt)) return "xml";
-  if (/ID\s*\|\s*Text/i.test(systemPrompt)) return "textlines";
-  return "json";
+  const note = outputFormat.promptNote ? `\n${outputFormat.promptNote}` : "";
+  return `## Example:\n### Input\n\`\`\`\n${input_example}\n\`\`\`\n### Output\n\`\`\`\n${output_example}\n\`\`\`\n## Note: ${note}`;
 };
 
-const buildBatchExample = (
-  systemPrompt,
-  parser = getParserPreset(detectBatchFormat(systemPrompt))
+// 供 UI 预览使用：按格式名渲染请求时自动追加到系统提示词的示例，
+// 与 genTransReq 运行时路径（resolveIoPreset + buildBatchExample）逐字节一致。
+export const renderBatchExample = (
+  inputFormatName = "json",
+  outputFormatName = "json",
+  inputTemplate = ""
 ) => {
-  const output = parser.render(SAMPLE_TRANSLATIONS);
-  const note = parser.promptNote ? `\n${parser.promptNote}` : "";
-  return `Example:\nInput: ${renderExampleInput(
-    parser
-  )}\nOutput: ${output}${note}`;
+  const { inputFormat, outputFormat } = resolveIoPreset(
+    inputFormatName,
+    outputFormatName,
+    inputTemplate
+  );
+  return buildBatchExample(inputFormat, outputFormat);
 };
 
 const genUserPrompt = ({
@@ -203,7 +215,8 @@ const genUserPrompt = ({
   fromLang,
   toLang,
   texts,
-  batchParser = null,
+  inputFormat = getInputFormatPreset("json"),
+  outputFormat = getParserPreset("json"),
   docInfo: { title = "", description = "", summary = "", context = "" } = {},
 }) => {
   // 合并规则与接口中的AI专业术语
@@ -224,7 +237,8 @@ const genUserPrompt = ({
         has_glossary: Object.keys(glossary).length !== 0,
         tone,
       },
-      batchParser
+      inputFormat,
+      outputFormat
     );
   }
 
@@ -303,12 +317,16 @@ const parseAIRes = (raw, useBatchFetch = true, parser = null) => {
   // 无 parser 时回落到旧的 decodeHTMLEntities，保持 hook/旧调用路径行为不变。
   const decodeText = parser?.denormalize || decodeHTMLEntities;
 
-  // JSON/XML/LINE 三种聚合格式统一交给共享字符串解析器处理。
+  // JSON/XML/LINE/PERCENT 聚合格式统一交给共享字符串解析器处理。
   // 这里不再直接使用 DOMParser 解析 XML，避免浏览器 Trusted Types / DOMPurify
   // 清洗自定义标签后导致非流式路径拿不到 <t> 译文。
   // parse 阶段不注入 decodeText：各格式解析器只做结构抽取与 <br>→换行 折叠，
   // 实体还原统一在本层做一次，避免 JSON/LINE 分支被二次解码。
-  const structuredSegments = parseCompleteTranslationSegments(content);
+  // 显式指定 parser（所选批处理提示词的输出格式已确定）时先用该 preset 自带的 parse，
+  // 无结果再回落到通用 dispatcher，兼容提示词与响应格式不一致的旧路径。
+  const parsed = parser ? parser.parse(content) : [];
+  const structuredSegments =
+    parsed.length > 0 ? parsed : parseCompleteTranslationSegments(content);
   if (structuredSegments.length > 0) {
     return structuredSegments.map((segment) => [
       decodeText(segment.translation[0]),
@@ -1143,13 +1161,19 @@ export const genTransReq = async ({ reqHook, ...args }) => {
         });
 
     const useBatchMode = useBatchFetch && !events;
-    // 批量输出格式由系统提示词特征一次判定，示例与真实 user message、解码侧共用同一 preset。
-    const batchParser = useBatchMode
-      ? getParserPreset(detectBatchFormat(baseSystemPrompt))
-      : null;
+    // 聚合输入输出格式由所选批处理提示词内联（apiSetting.ioInputFormat 等），
+    // 示例与真实 user message、解码侧共用。
+    const { inputFormat, outputFormat } = resolveIoPreset(
+      args.ioInputFormat,
+      args.ioOutputFormat,
+      args.ioInputTemplate
+    );
 
     args.systemPrompt = useBatchMode
-      ? `${baseSystemPrompt}\n\n${buildBatchExample(baseSystemPrompt, batchParser)}`
+      ? `${baseSystemPrompt}\n\n${buildBatchExample(
+          inputFormat,
+          outputFormat
+        )}`
       : baseSystemPrompt;
     args.userPrompt = events
       ? buildSubtitleUserPrompt({
@@ -1169,7 +1193,8 @@ export const genTransReq = async ({ reqHook, ...args }) => {
           tone,
           glossary,
           aiTerms,
-          batchParser,
+          inputFormat,
+          outputFormat,
         });
   }
 
@@ -1250,12 +1275,16 @@ export const parseTransRes = async (
     userMsg,
     apiType,
     useBatchFetch,
-    systemPrompt = "",
+    ioInputFormat = "json",
+    ioOutputFormat = "json",
+    ioInputTemplate = "",
   }
 ) => {
   // 批量解析按输出格式注入对应 denormalize，保证 XML/LINE 的转义实体被还原。
-  const batchParser = useBatchFetch
-    ? getParserPreset(detectBatchFormat(systemPrompt))
+  // 输出格式由所选批处理提示词（ioOutputFormat）决定。
+  const outputFormat = useBatchFetch
+    ? resolveIoPreset(ioInputFormat, ioOutputFormat, ioInputTemplate)
+        .outputFormat
     : null;
   // 执行 response hook
   if (resHook?.trim()) {
@@ -1350,13 +1379,13 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(modelMsg?.content, useBatchFetch, batchParser);
+      return parseAIRes(modelMsg?.content, useBatchFetch, outputFormat);
     case OPT_TRANS_GEMINI:
       modelMsg = res?.candidates?.[0]?.content;
       if (history && userMsg && modelMsg) {
         history.add(userMsg, modelMsg);
       }
-      return parseAIRes(geminiText(modelMsg?.parts), useBatchFetch, batchParser);
+      return parseAIRes(geminiText(modelMsg?.parts), useBatchFetch, outputFormat);
     case OPT_TRANS_CLAUDE:
       modelMsg = { role: res?.role, content: res?.content?.text };
       if (history && userMsg && modelMsg) {
@@ -1365,7 +1394,7 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(res?.content?.[0]?.text ?? "", useBatchFetch, batchParser);
+      return parseAIRes(res?.content?.[0]?.text ?? "", useBatchFetch, outputFormat);
     case OPT_TRANS_CLOUDFLAREAI:
       return [[res?.result?.translated_text]];
     case OPT_TRANS_OLLAMA:
@@ -1384,7 +1413,7 @@ export const parseTransRes = async (
           content: modelMsg.content,
         });
       }
-      return parseAIRes(modelMsg?.content, useBatchFetch, batchParser);
+      return parseAIRes(modelMsg?.content, useBatchFetch, outputFormat);
     case OPT_TRANS_CUSTOMIZE:
       if (useBatchFetch) {
         return (res?.translations ?? res)?.map((item) => [item.text, item.src]);
@@ -1648,9 +1677,14 @@ export async function* handleTranslate(
 
   const enableStream = useStream && API_SPE_TYPES.stream.has(apiType);
 
-  // 批量输出格式（xml/textlines/json）由系统提示词一次判定，供流式 denormalize 与兜底解析共用。
+  // 批量输出格式（xml/textlines/json）由所选批处理提示词（apiSetting.ioOutputFormat）决定，
+  // 供流式 denormalize 与兜底解析共用。
   const batchFormat = apiSetting.useBatchFetch
-    ? detectBatchFormat(apiSetting.systemPrompt || "")
+    ? resolveIoPreset(
+        apiSetting.ioInputFormat,
+        apiSetting.ioOutputFormat,
+        apiSetting.ioInputTemplate
+      ).outputFormat.name
     : "json";
 
   let token = "";

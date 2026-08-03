@@ -66,6 +66,9 @@ export const PRESET_PROMPTS = [
     name: "Batch translation (JSON)",
     systemPrompt: defaultSystemPrompt,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "json",
+    inputTemplate: "",
   },
   {
     slug: PROMPT_SLUG_BATCH_TRANSLATION_XML,
@@ -74,6 +77,9 @@ export const PRESET_PROMPTS = [
     name: "Batch translation (XML)",
     systemPrompt: defaultSystemPromptXml,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "xml",
+    inputTemplate: "",
   },
   {
     slug: PROMPT_SLUG_BATCH_TRANSLATION_LINE,
@@ -82,6 +88,9 @@ export const PRESET_PROMPTS = [
     name: "Batch translation (LINE)",
     systemPrompt: defaultSystemPromptLines,
     userPrompt: "",
+    inputFormat: "json",
+    outputFormat: "textlines",
+    inputTemplate: "",
   },
   {
     slug: PROMPT_SLUG_SUBTITLE_SEGMENTATION,
@@ -110,6 +119,9 @@ const PROMPT_STORAGE_FIELDS = [
   "name",
   "systemPrompt",
   "userPrompt",
+  "inputFormat",
+  "outputFormat",
+  "inputTemplate",
 ];
 
 /**
@@ -127,6 +139,9 @@ export function normalizePrompt(prompt = {}) {
     name: String(prompt.name || ""),
     systemPrompt: String(prompt.systemPrompt || ""),
     userPrompt: String(prompt.userPrompt || ""),
+    inputFormat: String(prompt.inputFormat || ""),
+    outputFormat: String(prompt.outputFormat || ""),
+    inputTemplate: String(prompt.inputTemplate || ""),
   };
 }
 
@@ -162,13 +177,27 @@ export function normalizeCustomPrompts(userPrompts = []) {
   return (Array.isArray(userPrompts) ? userPrompts : [])
     .map(normalizePrompt)
     .filter((prompt) => prompt.slug && !isPresetPromptSlug(prompt.slug))
-    .map(({ slug, category, name, systemPrompt, userPrompt }) => ({
-      slug,
-      category,
-      name,
-      systemPrompt,
-      userPrompt,
-    }));
+    .map(
+      ({
+        slug,
+        category,
+        name,
+        systemPrompt,
+        userPrompt,
+        inputFormat,
+        outputFormat,
+        inputTemplate,
+      }) => ({
+        slug,
+        category,
+        name,
+        systemPrompt,
+        userPrompt,
+        inputFormat,
+        outputFormat,
+        inputTemplate,
+      })
+    );
 }
 
 /**
@@ -835,6 +864,10 @@ export function resolveApiPromptSettings(
   if (batchPrompt && (hasBatchPromptReference || !hasBatchPromptInlineValue)) {
     nextApiSetting.batchPromptSlug = batchPrompt.slug;
     nextApiSetting.systemPrompt = batchPrompt.systemPrompt;
+    // 聚合输入/输出格式随所选批处理提示词内联，供 trans.js 直接使用，二者永不漂移。
+    nextApiSetting.ioInputFormat = batchPrompt.inputFormat || "json";
+    nextApiSetting.ioOutputFormat = batchPrompt.outputFormat || "json";
+    nextApiSetting.ioInputTemplate = batchPrompt.inputTemplate || "";
   }
 
   const hasNobatchPromptReference = hasPromptReferenceField(

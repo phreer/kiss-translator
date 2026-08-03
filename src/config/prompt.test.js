@@ -27,6 +27,7 @@ import {
   defaultDictUserPrompt,
   defaultSubtitlePrompt,
   defaultSystemPrompt,
+  defaultSystemPromptXml,
 } from "./api";
 
 describe("prompt settings", () => {
@@ -291,6 +292,9 @@ describe("prompt settings", () => {
       name: "Custom prompt",
       systemPrompt: "system",
       userPrompt: "user",
+      inputFormat: "",
+      outputFormat: "",
+      inputTemplate: "",
     });
   });
 
@@ -311,5 +315,101 @@ describe("prompt settings", () => {
         expect.objectContaining({ slug: DEFAULT_DICTIONARY_PROMPT_SLUG }),
       ])
     );
+  });
+
+  test("preset batch prompts bind fixed input/output formats", () => {
+    const batchPresets = PRESET_PROMPTS.filter(
+      (prompt) => prompt.category === "batch system prompt"
+    );
+    expect(batchPresets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: "batch-translation-json",
+          inputFormat: "json",
+          outputFormat: "json",
+        }),
+        expect.objectContaining({
+          slug: "batch-translation-xml",
+          inputFormat: "json",
+          outputFormat: "xml",
+        }),
+        expect.objectContaining({
+          slug: "batch-translation-line",
+          inputFormat: "json",
+          outputFormat: "textlines",
+        }),
+      ])
+    );
+  });
+
+  test("normalizePrompt carries input/output format fields", () => {
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        inputFormat: "percent",
+        outputFormat: "xml",
+        inputTemplate: "Custom {{to_lang|raw}}",
+      })
+    ).toMatchObject({
+      slug: "prompt_custom",
+      inputFormat: "percent",
+      outputFormat: "xml",
+      inputTemplate: "Custom {{to_lang|raw}}",
+    });
+    expect(normalizePrompt({}).inputFormat).toBe("");
+  });
+
+  test("resolveApiPromptSettings inlines the batch prompt format into the api setting", () => {
+    const api = {
+      apiSlug: "openai",
+      batchPromptSlug: "batch-translation-xml",
+    };
+    expect(resolveApiPromptSettings(api)).toMatchObject({
+      batchPromptSlug: "batch-translation-xml",
+      systemPrompt: defaultSystemPromptXml,
+      ioInputFormat: "json",
+      ioOutputFormat: "xml",
+      ioInputTemplate: "",
+    });
+  });
+
+  test("resolveApiPromptSettings falls back to json format for prompts without format", () => {
+    const customPrompt = {
+      slug: "prompt_custom",
+      category: "batch system prompt",
+      name: "Custom batch",
+      systemPrompt: "Translate it.",
+    };
+    const api = resolveApiPromptSettings(
+      { apiSlug: "openai", batchPromptSlug: "prompt_custom" },
+      [customPrompt]
+    );
+    expect(api).toMatchObject({
+      batchPromptSlug: "prompt_custom",
+      systemPrompt: "Translate it.",
+      ioInputFormat: "json",
+      ioOutputFormat: "json",
+      ioInputTemplate: "",
+    });
+  });
+
+  test("normalizeCustomPrompts keeps custom prompt formats", () => {
+    const normalized = normalizeCustomPrompts([
+      {
+        slug: "prompt_custom",
+        category: "batch system prompt",
+        name: "Custom batch",
+        systemPrompt: "Translate it.",
+        userPrompt: "",
+        inputFormat: "percent",
+        outputFormat: "xml",
+        inputTemplate: "Tpl {{to_lang|raw}}",
+      },
+    ]);
+    expect(normalized[0]).toMatchObject({
+      inputFormat: "percent",
+      outputFormat: "xml",
+      inputTemplate: "Tpl {{to_lang|raw}}",
+    });
   });
 });
