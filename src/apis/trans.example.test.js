@@ -16,13 +16,8 @@ jest.mock("../libs/docInfo", () => ({
 }));
 
 import { genTransReq, parseTransRes, renderBatchExample } from "./trans";
-import {
-  defaultSystemPrompt,
-  defaultSystemPromptXml,
-  defaultSystemPromptLines,
-  defaultNobatchPrompt,
-  OPT_TRANS_OPENAI,
-} from "../config";
+import { defaultSystemPrompt, defaultNobatchPrompt, OPT_TRANS_OPENAI } from "../config";
+import { parserPresets } from "../libs/aiResponseParser";
 import {
   applyPromptTestOverrides,
   resolveApiPromptSettings,
@@ -38,10 +33,9 @@ const EXAMPLE_INPUT_XML =
 const EXAMPLE_INPUT_LINE =
   '{"targetLanguage":"zh-CN","segments":[{"id":0,"text":"A <b>React</b> component."},{"id":1,"text":"Line 1<br>Line 2"}],"glossary":{"component":"组件","React":""}}';
 
-const XML_PROMPT_NOTE =
-  "Write a literal <, > or & in translated text as &lt;, &gt;, &amp; respectively.";
-const LINES_PROMPT_NOTE =
-  "Use <br> for newlines; write a literal <br> as &lt;br&gt; and & as &amp;.";
+const XML_PROMPT_NOTE = parserPresets.xml.promptNote;
+const LINES_PROMPT_NOTE = parserPresets.textlines.promptNote;
+const JSON_PROMPT_NOTE = parserPresets.json.promptNote;
 
 const EXAMPLE_OUTPUT_JSON =
   '{"translations":[{"id":0,"text":"一个<b>React</b>组件","sourceLanguage":"en"},{"id":1,"text":"第一行\\n第二行","sourceLanguage":"en"}]}';
@@ -52,11 +46,24 @@ const EXAMPLE_OUTPUT_XML =
 const EXAMPLE_OUTPUT_LINE = "0 | 一个<b>React</b>组件\n1 | 第一行<br>第二行";
 
 // 与 buildBatchExample 的 markdown 输出逐字节一致的期望串构造器。
-// note 为空时生成 "## Note: "（含尾随空格），有值时生成 "## Note: \n{note}"。
+// note 为空时不生成 Note 小节，有值时追加 "### Note\n{note}"。
 const EXAMPLE_MARKDOWN = (input, output, note = "") =>
-  `## Example:\n### Input\n\`\`\`\n${input}\n\`\`\`\n### Output\n\`\`\`\n${output}\n\`\`\`\n## Note: ${
-    note ? `\n${note}` : ""
-  }`;
+  `## Input Output protocol
+You will receive a batch of text segments in the input format below, and the output should be in the format specified below.
+
+### Input
+The input looks like:
+\`\`\`
+${input}
+\`\`\`
+
+### Output
+The output should be in the following format:
+\`\`\`
+${output}
+\`\`\`
+
+${note ? `### Note\n${note}` : ""}`;
 
 const renderSystemPrompt = async ({
   systemPrompt,
@@ -113,18 +120,19 @@ describe("batch system prompt example", () => {
     expect(content).toBe(
       `${defaultSystemPrompt}\n\n${EXAMPLE_MARKDOWN(
         EXAMPLE_INPUT,
-        EXAMPLE_OUTPUT_JSON
+        EXAMPLE_OUTPUT_JSON,
+        JSON_PROMPT_NOTE
       )}`
     );
   });
 
-  test("XML prompt with ioOutputFormat xml appends unified XML example and escape note", async () => {
+  test("XML output format appends unified XML example and format note", async () => {
     const content = await renderSystemPrompt({
-      systemPrompt: defaultSystemPromptXml,
+      systemPrompt: defaultSystemPrompt,
       ioOutputFormat: "xml",
     });
     expect(content).toBe(
-      `${defaultSystemPromptXml}\n\n${EXAMPLE_MARKDOWN(
+      `${defaultSystemPrompt}\n\n${EXAMPLE_MARKDOWN(
         EXAMPLE_INPUT_XML,
         EXAMPLE_OUTPUT_XML,
         XML_PROMPT_NOTE
@@ -132,13 +140,13 @@ describe("batch system prompt example", () => {
     );
   });
 
-  test("LINE prompt with ioOutputFormat textlines appends unified line example and escape note", async () => {
+  test("LINE output format appends unified line example and format note", async () => {
     const content = await renderSystemPrompt({
-      systemPrompt: defaultSystemPromptLines,
+      systemPrompt: defaultSystemPrompt,
       ioOutputFormat: "textlines",
     });
     expect(content).toBe(
-      `${defaultSystemPromptLines}\n\n${EXAMPLE_MARKDOWN(
+      `${defaultSystemPrompt}\n\n${EXAMPLE_MARKDOWN(
         EXAMPLE_INPUT_LINE,
         EXAMPLE_OUTPUT_LINE,
         LINES_PROMPT_NOTE
@@ -147,17 +155,17 @@ describe("batch system prompt example", () => {
   });
 
   test("each format's example input is byte-identical to its own real user message", async () => {
-    for (const [systemPrompt, ioOutputFormat, expectedInput] of [
-      [defaultSystemPrompt, "json", EXAMPLE_INPUT],
-      [defaultSystemPromptXml, "xml", EXAMPLE_INPUT_XML],
-      [defaultSystemPromptLines, "textlines", EXAMPLE_INPUT_LINE],
+    for (const [ioOutputFormat, expectedInput] of [
+      ["json", EXAMPLE_INPUT],
+      ["xml", EXAMPLE_INPUT_XML],
+      ["textlines", EXAMPLE_INPUT_LINE],
     ]) {
       const content = await renderSystemPrompt({
-        systemPrompt,
+        systemPrompt: defaultSystemPrompt,
         ioOutputFormat,
       });
       expect(content).toContain(
-        `### Input\n\`\`\`\n${expectedInput}\n\`\`\``
+        `### Input\nThe input looks like:\n\`\`\`\n${expectedInput}\n\`\`\``
       );
 
       const [, , userMsg] = await genTransReq({
@@ -165,7 +173,7 @@ describe("batch system prompt example", () => {
         url: "https://api.openai.com/v1/chat/completions",
         key: "test-key",
         model: "test-model",
-        systemPrompt,
+        systemPrompt: defaultSystemPrompt,
         useBatchFetch: true,
         ioOutputFormat,
         from: "en",
@@ -187,7 +195,8 @@ describe("batch system prompt example", () => {
     expect(content).toBe(
       `Custom batch rules only.\n\n${EXAMPLE_MARKDOWN(
         EXAMPLE_INPUT,
-        EXAMPLE_OUTPUT_JSON
+        EXAMPLE_OUTPUT_JSON,
+        JSON_PROMPT_NOTE
       )}`
     );
   });
@@ -239,7 +248,7 @@ describe("batch decode (denormalize wiring)", () => {
   test("XML batch decodes escaped entities back to rich text", async () => {
     const result = await parseOpenAI(
       '<root>\n    <t id="0" sourceLanguage="en">一个&lt;b&gt;React&lt;/b&gt;组件</t>\n</root>',
-      defaultSystemPromptXml,
+      defaultSystemPrompt,
       "xml"
     );
     expect(result).toEqual([["一个<b>React</b>组件", "en"]]);
@@ -248,7 +257,7 @@ describe("batch decode (denormalize wiring)", () => {
   test("XML batch keeps &amp;lt; as a literal single-pass restore", async () => {
     const result = await parseOpenAI(
       '<root><t id="0" sourceLanguage="en">&amp;lt;br&amp;gt;</t></root>',
-      defaultSystemPromptXml,
+      defaultSystemPrompt,
       "xml"
     );
     expect(result).toEqual([["&lt;br&gt;", "en"]]);
@@ -257,7 +266,7 @@ describe("batch decode (denormalize wiring)", () => {
   test("LINE batch folds <br> to newlines and denormalizes literal <br>", async () => {
     const result = await parseOpenAI(
       "0 | 第一行<br>第二行\n1 | a &lt;br&gt; b",
-      defaultSystemPromptLines,
+      defaultSystemPrompt,
       "textlines"
     );
     expect(result).toEqual([
@@ -277,7 +286,7 @@ describe("batch decode (denormalize wiring)", () => {
   test("plain-text fallback still decodes per preset", async () => {
     const result = await parseOpenAI(
       "一个&lt;b&gt;React&lt;/b&gt;组件",
-      defaultSystemPromptXml,
+      defaultSystemPrompt,
       "xml"
     );
     expect(result).toEqual([["一个<b>React</b>组件", ""]]);
@@ -316,8 +325,8 @@ describe("io format wiring", () => {
       ioInputFormat: "percent",
       ioOutputFormat: "json",
     });
-    expect(content).toContain("\nSegments:\n[0]");
-    expect(content).toContain(`### Output\n\`\`\`\n${EXAMPLE_OUTPUT_JSON}`);
+    expect(content).toContain("\nSegments:\n");
+    expect(content).toContain(`### Output\nThe output should be in the following format:\n\`\`\`\n${EXAMPLE_OUTPUT_JSON}`);
   });
 
   test("ioInputFormat percent keeps example input byte-identical to a real user message", async () => {
@@ -327,8 +336,9 @@ describe("io format wiring", () => {
       ioOutputFormat: "percent",
     });
     const exampleInput = content.slice(
-      content.indexOf("### Input\n```\n") + "### Input\n```\n".length,
-      content.indexOf("\n```\n### Output")
+      content.indexOf("### Input\nThe input looks like:\n```\n") +
+        "### Input\nThe input looks like:\n```\n".length,
+      content.indexOf("\n```\n\n### Output")
     );
     const [, , userMsg] = await genTransReq({
       apiType: OPT_TRANS_OPENAI,
@@ -349,8 +359,8 @@ describe("io format wiring", () => {
     });
     expect(userMsg.content).toBe(exampleInput);
     expect(userMsg.content).toMatch(/^Target Language: zh-CN\nGlossary:\n/);
-    expect(userMsg.content).toContain("\nSegments:\n[0]");
-    expect(userMsg.content).toContain("\n%%\n[1]");
+    expect(userMsg.content).toContain("\nSegments:\n");
+    expect(userMsg.content).toContain("\n%%\n");
   });
 
   test("ioInputFormat percent escapes % and backslash once (no double escape)", async () => {
@@ -371,13 +381,13 @@ describe("io format wiring", () => {
       glossary: {},
       docInfo: { title: "", description: "" },
     });
-    expect(userMsg.content).toContain("[0]\n50\\% off");
-    expect(userMsg.content).toContain("[1]\na\\\\b");
+    expect(userMsg.content).toContain("50\\% off");
+    expect(userMsg.content).toContain("a\\\\b");
   });
 
   test("ioOutputFormat percent decodes escaped output back to plain text", async () => {
     const result = await parseOpenAI(
-      "[0]\n50\\% off\n%%\n[1]\nHello",
+      "50\\% off\n%%\nHello",
       defaultSystemPrompt,
       "percent"
     );
@@ -416,7 +426,9 @@ describe("io format wiring", () => {
       systemPrompt: defaultSystemPrompt,
       ioInputFormat: "custom",
     });
-    expect(content).toContain(`### Input\n\`\`\`\n${EXAMPLE_INPUT}`);
+    expect(content).toContain(
+      `### Input\nThe input looks like:\n\`\`\`\n${EXAMPLE_INPUT}`
+    );
   });
 });
 
@@ -425,7 +437,7 @@ describe("io format wiring", () => {
 describe("renderBatchExample (UI preview)", () => {
   test("default json/json preview matches the appended JSON example", () => {
     expect(renderBatchExample()).toBe(
-      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON)
+      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON, JSON_PROMPT_NOTE)
     );
   });
 
@@ -466,17 +478,18 @@ describe("renderBatchExample (UI preview)", () => {
     ).toBe(
       EXAMPLE_MARKDOWN(
         "Translate: zh-CN|0:A <b>React</b> component.;1:Line 1\nLine 2;",
-        EXAMPLE_OUTPUT_JSON
+        EXAMPLE_OUTPUT_JSON,
+        JSON_PROMPT_NOTE
       )
     );
   });
 
   test("unknown or empty formats fall back to json/json", () => {
     expect(renderBatchExample("", "")).toBe(
-      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON)
+      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON, JSON_PROMPT_NOTE)
     );
     expect(renderBatchExample("bogus", "bogus")).toBe(
-      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON)
+      EXAMPLE_MARKDOWN(EXAMPLE_INPUT, EXAMPLE_OUTPUT_JSON, JSON_PROMPT_NOTE)
     );
   });
 });

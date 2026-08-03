@@ -30,7 +30,6 @@ import {
   defaultDictUserPrompt,
   defaultSubtitlePrompt,
   defaultSystemPrompt,
-  defaultSystemPromptXml,
 } from "./api";
 
 describe("prompt settings", () => {
@@ -369,7 +368,7 @@ describe("prompt settings", () => {
     };
     expect(resolveApiPromptSettings(api)).toMatchObject({
       batchPromptSlug: "batch-translation-xml",
-      systemPrompt: defaultSystemPromptXml,
+      systemPrompt: defaultSystemPrompt,
       ioInputFormat: "json",
       ioOutputFormat: "xml",
       ioInputTemplate: "",

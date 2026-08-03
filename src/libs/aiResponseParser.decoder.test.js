@@ -39,9 +39,9 @@ describe("render functions (Output example generation)", () => {
     );
   });
 
-  test("percent render mirrors the percent encoder block structure", () => {
+  test("percent render joins blocks with %% separators and no id headers", () => {
     expect(renderPercentOutput(SAMPLE)).toBe(
-      "[0]\n一个<b>React</b>组件\n%%\n\n[1]\n第一行\n第二行"
+      "一个<b>React</b>组件\n\n%%\n\n第一行\n第二行"
     );
   });
 
@@ -68,10 +68,8 @@ describe("render functions (Output example generation)", () => {
 });
 
 describe("parsePercentTranslationSegments", () => {
-  test("parses id-prefixed blocks separated by %%", () => {
-    expect(
-      parsePercentTranslationSegments("[0]\nHello\n%%\n\n[1]\nWorld")
-    ).toEqual([
+  test("parses blocks separated by %% in order", () => {
+    expect(parsePercentTranslationSegments("Hello\n%%\n\nWorld")).toEqual([
       { id: 0, translation: ["Hello", ""] },
       { id: 1, translation: ["World", ""] },
     ]);
@@ -85,21 +83,21 @@ describe("parsePercentTranslationSegments", () => {
   });
 
   test("skips empty blocks and trims surrounding whitespace", () => {
-    expect(parsePercentTranslationSegments("  [0]\n A \n%%\n\n%%\n\n [1]\nB ")).toEqual([
+    expect(parsePercentTranslationSegments("  A \n%%\n\n%%\n\n B ")).toEqual([
       { id: 0, translation: ["A", ""] },
-      { id: 1, translation: ["B", ""] },
+      { id: 2, translation: ["B", ""] },
     ]);
   });
 
   test("preserves internal newlines inside a block", () => {
-    expect(parsePercentTranslationSegments("[1]\nLine 1\nLine 2")).toEqual([
-      { id: 1, translation: ["Line 1\nLine 2", ""] },
+    expect(parsePercentTranslationSegments("Line 1\nLine 2")).toEqual([
+      { id: 0, translation: ["Line 1\nLine 2", ""] },
     ]);
   });
 
   test("applies decodeText to extracted text", () => {
     expect(
-      parsePercentTranslationSegments("[0]\n&amp;", {
+      parsePercentTranslationSegments("&amp;", {
         decodeText: (s) => s.replace(/&amp;/g, "&"),
       })
     ).toEqual([{ id: 0, translation: ["&", ""] }]);
@@ -107,7 +105,7 @@ describe("parsePercentTranslationSegments", () => {
 
   test("handles empty and malformed input", () => {
     expect(parsePercentTranslationSegments("")).toEqual([]);
-    expect(parsePercentTranslationSegments("%%  %%")).toEqual([]);
+    expect(parsePercentTranslationSegments("   ")).toEqual([]);
   });
 });
 
@@ -274,7 +272,7 @@ describe("parserPresets registry", () => {
       expect(typeof preset.denormalize).toBe("function");
       expect(typeof preset.promptNote).toBe("string");
     }
-    expect(parserPresets.json.promptNote).toBe("");
+    expect(parserPresets.json.promptNote.length).toBeGreaterThan(0);
     expect(parserPresets.json.normalize("a<b>&c")).toBe("a<b>&c");
     expect(parserPresets.xml.promptNote).toContain("&lt;");
     expect(parserPresets.percent.promptNote.length).toBeGreaterThan(0);
