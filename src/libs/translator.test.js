@@ -7,6 +7,7 @@ jest.mock("./msg", () => ({
 }));
 
 const { apiTranslate } = require("../apis");
+const { DEFAULT_API_LIST } = require("../config/api");
 const { Translator } = require("./translator");
 
 const flushAsync = async () => {
@@ -220,6 +221,76 @@ describe("Translator rule styles", () => {
     expect(combinedRequestedText).toContain("tail");
     expect(wrapper).not.toBeNull();
     expect(wrapper.textContent).toBe("Translated mixed inline content");
+  });
+
+  test("protects newlines with placeholders when newlineProtect is enabled", async () => {
+    apiTranslate.mockImplementation(({ text }) =>
+      Promise.resolve({ trText: text, isSame: false })
+    );
+    document.body.innerHTML =
+      '<main id="root"><p id="target">line one\nline two</p></main>';
+
+    createTranslator(
+      {
+        autoScan: "false",
+        selector: "#target",
+        apiSlug: "test-api",
+      },
+      {
+        minLength: 0,
+        transApis: [
+          {
+            ...DEFAULT_API_LIST[0],
+            apiSlug: "test-api",
+            newlineProtect: true,
+          },
+        ],
+      }
+    );
+    await flushAsync();
+
+    const requestedText = apiTranslate.mock.calls[0][0].text;
+    const wrapper = document.querySelector(`.${Translator.KISS_CLASS.warpper}`);
+
+    expect(requestedText).toContain("{1}");
+    expect(requestedText).not.toContain("\n");
+    expect(wrapper.textContent).toContain("line one");
+    expect(wrapper.textContent).toContain("line two");
+  });
+
+  test("passes newlines through raw when newlineProtect is disabled", async () => {
+    apiTranslate.mockImplementation(({ text }) =>
+      Promise.resolve({ trText: text, isSame: false })
+    );
+    document.body.innerHTML =
+      '<main id="root"><p id="target">line one\nline two</p></main>';
+
+    createTranslator(
+      {
+        autoScan: "false",
+        selector: "#target",
+        apiSlug: "test-api",
+      },
+      {
+        minLength: 0,
+        transApis: [
+          {
+            ...DEFAULT_API_LIST[0],
+            apiSlug: "test-api",
+            newlineProtect: false,
+          },
+        ],
+      }
+    );
+    await flushAsync();
+
+    const requestedText = apiTranslate.mock.calls[0][0].text;
+    const wrapper = document.querySelector(`.${Translator.KISS_CLASS.warpper}`);
+
+    expect(requestedText).toContain("\n");
+    expect(requestedText).not.toContain("{1}");
+    expect(wrapper.textContent).toContain("line one");
+    expect(wrapper.textContent).toContain("line two");
   });
 
   test("continues scanning block children after processing mixed parent nodes", async () => {
