@@ -461,6 +461,7 @@ function ApiFields({ apiSlug, deleteApi, copyApi, onCollapse }) {
     placeholder = BUILTIN_PLACEHOLDERS[0],
     placetag = BUILTIN_PLACETAGS[0],
     placetagFormat = "compact",
+    newlineProtect = true,
     region = "",
     sortOrder = 0,
     aiTerms = "",
@@ -1187,6 +1188,20 @@ function ApiFields({ apiSlug, deleteApi, copyApi, onCollapse }) {
                   <MenuItem value="attribute">
                     {i18n("format_attribute") || "属性格式 <a i=1>"}
                   </MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={12} md={6} lg={3}>
+                <TextField
+                  select
+                  fullWidth
+                  size="small"
+                  name="newlineProtect"
+                  value={newlineProtect}
+                  label={i18n("newline_protect") || "换行符保护"}
+                  onChange={handleChange}
+                >
+                  <MenuItem value={false}>{i18n("disable")}</MenuItem>
+                  <MenuItem value={true}>{i18n("enable")}</MenuItem>
                 </TextField>
               </Grid>
             </Grid>
