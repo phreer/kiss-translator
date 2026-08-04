@@ -781,7 +781,7 @@ const defaultApi = {
   region: "", // Azure 专用
   sortOrder: 0, // 排序权重，数值越小越靠前
   placetagFormat: "compact", // 占位符格式：compact(<a1>) 或 attribute(<a i=1>)
-  newlineProtect: true, // 用占位符保护换行符（小模型可能处理不好占位符，可关闭）
+  newlineProtect: true, // 用占位符保护会渲染为换行的换行符（pre 家族）；普通软换行始终折叠为空格。小模型可能处理不好占位符，可关闭
 };
 
 // AI 翻译接口默认参数
