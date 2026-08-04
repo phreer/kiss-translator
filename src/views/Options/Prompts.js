@@ -45,6 +45,7 @@ import {
   PROMPT_CATEGORY_SUBTITLE,
   PROMPT_CATEGORY_USER,
   PROMPT_TEMPLATE_CATEGORIES,
+  DEFAULT_BATCH_PROMPT_SLUG,
   getPromptCategoryDisplayName,
   getPromptDisplayName,
   normalizePrompt,
@@ -332,7 +333,10 @@ function PromptFields({
         <Stack spacing={1}>
           <CodeField
             size="small"
-            label={i18n("batch_auto_example", "自动渲染的示例（请求时自动追加）")}
+            label={i18n(
+              "batch_auto_example",
+              "自动渲染的示例（请求时自动追加）"
+            )}
             value={batchExample}
             InputProps={{ readOnly: true }}
             minRows={3}
@@ -518,11 +522,20 @@ export default function Prompts() {
     () =>
       PROMPT_TEMPLATE_CATEGORIES.map((category) => ({
         category,
-        templates: prompts.filter(
-          (prompt) =>
-            isPresetPromptSlug(normalizePrompt(prompt).slug) &&
-            normalizePrompt(prompt).category === category
-        ),
+        templates: prompts.filter((prompt) => {
+          const normalized = normalizePrompt(prompt);
+          if (!isPresetPromptSlug(normalized.slug)) {
+            return false;
+          }
+          if (normalized.category !== category) {
+            return false;
+          }
+          // 聚合翻译预设已合并：新增模板统一以默认预设为代表，避免按格式枚举。
+          if (category === PROMPT_CATEGORY_BATCH_SYSTEM) {
+            return normalized.slug === DEFAULT_BATCH_PROMPT_SLUG;
+          }
+          return true;
+        }),
       })).filter((group) => group.templates.length > 0),
     [isPresetPromptSlug, prompts]
   );
@@ -535,9 +548,9 @@ export default function Prompts() {
     setAnchorEl(null);
   };
 
-  const handleAddPromptFromTemplate = (template) => {
-    const templateName = getPromptDisplayName(template, i18n);
-    const promptSlug = addPrompt(template, templateName);
+  const handleAddPromptFromTemplate = (template, templateName = "") => {
+    const nameBase = templateName || getPromptDisplayName(template, i18n);
+    const promptSlug = addPrompt(template, nameBase);
     setSelectedPromptSlug(promptSlug);
     handleClose();
   };
@@ -595,18 +608,27 @@ export default function Prompts() {
                   <ListSubheader disableSticky>
                     {getPromptCategoryDisplayName(group.category, i18n)}
                   </ListSubheader>
-                  {group.templates.map((template) => (
-                    <MenuItem
-                      key={normalizePrompt(template).slug}
-                      onClick={() => handleAddPromptFromTemplate(template)}
-                      sx={{ gap: 1 }}
-                    >
-                      <LockIcon fontSize="small" color="action" />
-                      <Box component="span" sx={{ flex: 1 }}>
-                        {getPromptDisplayName(template, i18n)}
-                      </Box>
-                    </MenuItem>
-                  ))}
+                  {group.templates.map((template) => {
+                    const isBatchGroup =
+                      group.category === PROMPT_CATEGORY_BATCH_SYSTEM;
+                    const templateName = isBatchGroup
+                      ? i18n("add_prompt_batch_translation", "聚合翻译")
+                      : "";
+                    return (
+                      <MenuItem
+                        key={normalizePrompt(template).slug}
+                        onClick={() =>
+                          handleAddPromptFromTemplate(template, templateName)
+                        }
+                        sx={{ gap: 1 }}
+                      >
+                        <LockIcon fontSize="small" color="action" />
+                        <Box component="span" sx={{ flex: 1 }}>
+                          {templateName || getPromptDisplayName(template, i18n)}
+                        </Box>
+                      </MenuItem>
+                    );
+                  })}
                 </Fragment>
               ))}
             </Menu>
