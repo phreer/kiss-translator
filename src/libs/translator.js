@@ -2460,7 +2460,9 @@ overflow-wrap: anywhere !important;`;
         }
 
         // 换行符替换
-        text = text.replace(/\r?\n/g, () => pushReplace(`&#10;`));
+        if (this.#apiSetting.newlineProtect !== false) {
+          text = text.replace(/\r?\n/g, () => pushReplace(`&#10;`));
+        }
 
         return escapeHTML(text);
       }
