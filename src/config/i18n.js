@@ -1717,6 +1717,14 @@ export const I18N = {
     ko: `일괄 번역(JSON)`,
     tr: `Toplu Çeviri (JSON)`,
   },
+  add_prompt_batch_translation: {
+    zh: `聚合翻译`,
+    en: `Batch Translation`,
+    zh_TW: `聚合翻譯`,
+    ja: `一括翻訳`,
+    ko: `일괄 번역`,
+    tr: `Toplu Çeviri`,
+  },
   preset_prompt_batch_translation_xml: {
     zh: `聚合翻译（XML）`,
     en: `Batch Translation (XML)`,
