@@ -4124,6 +4124,14 @@ export const I18N = {
     ko: `플레이스홀더`,
     tr: `Yer Tutucu`,
   },
+  newline_protect: {
+    zh: `换行符保护`,
+    en: `Newline protection`,
+    zh_TW: `換行符保護`,
+    ja: `改行保護`,
+    ko: `줄바꿈 보호`,
+    tr: `Satır Sonu Koruması`,
+  },
   tag_name: {
     zh: `占位标签名`,
     en: `Placeholder tag name`,
