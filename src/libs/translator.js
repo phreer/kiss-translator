@@ -38,6 +38,14 @@ import { isExt } from "./client";
 import { sendBgMsg } from "./msg";
 import { getDocInfo } from "./docInfo";
 
+// white-space 取值中会把内部 \n 渲染为实际换行的集合（其余如 normal/nowrap 会折叠为空格）
+const RENDER_BREAK_WHITESPACE = new Set([
+  "pre",
+  "pre-wrap",
+  "pre-line",
+  "break-spaces",
+]);
+
 /**
  * @class Translator
  * @description 翻译核心逻辑封装
@@ -45,6 +53,9 @@ import { getDocInfo } from "./docInfo";
 export class Translator {
   // 块级判定缓存，避免对同一节点高频调用 window.getComputedStyle(el) 造成浏览器回流（Reflow）
   static displayCache = new WeakMap();
+
+  // 空白样式缓存，避免同一父节点下多个含换行文本节点重复 getComputedStyle。
+  static whitespaceCache = new WeakMap();
 
   // HTML 元素标签分类
   static TAGS = {
@@ -2459,9 +2470,29 @@ overflow-wrap: anywhere !important;`;
           });
         }
 
-        // 换行符替换
-        if (this.#apiSetting.newlineProtect !== false) {
-          text = text.replace(/\r?\n/g, () => pushReplace(`&#10;`));
+        // 换行处理：仅在换行会被渲染为实际换行（white-space: pre 家族）时用占位符保护，
+        // 普通 white-space（normal/nowrap）下的软换行折叠为单个空格，避免无意义的占位符。
+        if (/\r?\n/.test(text)) {
+          let rendersBreak = false;
+          const parent = node.parentElement;
+          if (parent) {
+            let cached = Translator.whitespaceCache.get(parent);
+            if (cached === undefined) {
+              cached = RENDER_BREAK_WHITESPACE.has(
+                window.getComputedStyle(parent).whiteSpace || ""
+              );
+              Translator.whitespaceCache.set(parent, cached);
+            }
+            rendersBreak = cached;
+          }
+          if (rendersBreak) {
+            if (this.#apiSetting.newlineProtect !== false) {
+              text = text.replace(/\r?\n/g, () => pushReplace(`&#10;`));
+            }
+            // newlineProtect=false：原样保留 \n，交给模型
+          } else {
+            text = text.replace(/\s+/g, " ");
+          }
         }
 
         return escapeHTML(text);

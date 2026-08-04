@@ -228,7 +228,7 @@ describe("Translator rule styles", () => {
       Promise.resolve({ trText: text, isSame: false })
     );
     document.body.innerHTML =
-      '<main id="root"><p id="target">line one\nline two</p></main>';
+      '<main id="root"><p id="target" style="white-space: pre-line">line one\nline two</p></main>';
 
     createTranslator(
       {
@@ -263,7 +263,7 @@ describe("Translator rule styles", () => {
       Promise.resolve({ trText: text, isSame: false })
     );
     document.body.innerHTML =
-      '<main id="root"><p id="target">line one\nline two</p></main>';
+      '<main id="root"><p id="target" style="white-space: pre-line">line one\nline two</p></main>';
 
     createTranslator(
       {
@@ -291,6 +291,71 @@ describe("Translator rule styles", () => {
     expect(requestedText).not.toContain("{1}");
     expect(wrapper.textContent).toContain("line one");
     expect(wrapper.textContent).toContain("line two");
+  });
+
+  test("collapses soft newlines to spaces under default whitespace even when newlineProtect is enabled", async () => {
+    apiTranslate.mockImplementation(({ text }) =>
+      Promise.resolve({ trText: text, isSame: false })
+    );
+    document.body.innerHTML =
+      '<main id="root"><p id="target">line one\nline two</p></main>';
+
+    createTranslator(
+      {
+        autoScan: "false",
+        selector: "#target",
+        apiSlug: "test-api",
+      },
+      {
+        minLength: 0,
+        transApis: [
+          {
+            ...DEFAULT_API_LIST[0],
+            apiSlug: "test-api",
+            newlineProtect: true,
+          },
+        ],
+      }
+    );
+    await flushAsync();
+
+    const requestedText = apiTranslate.mock.calls[0][0].text;
+
+    expect(requestedText).toContain("line one line two");
+    expect(requestedText).not.toContain("{1}");
+    expect(requestedText).not.toContain("\n");
+  });
+
+  test("collapses soft newlines to spaces under default whitespace when newlineProtect is disabled", async () => {
+    apiTranslate.mockImplementation(({ text }) =>
+      Promise.resolve({ trText: text, isSame: false })
+    );
+    document.body.innerHTML =
+      '<main id="root"><p id="target">line one\nline two</p></main>';
+
+    createTranslator(
+      {
+        autoScan: "false",
+        selector: "#target",
+        apiSlug: "test-api",
+      },
+      {
+        minLength: 0,
+        transApis: [
+          {
+            ...DEFAULT_API_LIST[0],
+            apiSlug: "test-api",
+            newlineProtect: false,
+          },
+        ],
+      }
+    );
+    await flushAsync();
+
+    const requestedText = apiTranslate.mock.calls[0][0].text;
+
+    expect(requestedText).toContain("line one line two");
+    expect(requestedText).not.toContain("\n");
   });
 
   test("continues scanning block children after processing mixed parent nodes", async () => {
