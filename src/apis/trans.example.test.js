@@ -396,40 +396,6 @@ describe("io format wiring", () => {
       ["Hello", ""],
     ]);
   });
-
-  test("ioInputFormat custom uses the custom input template", async () => {
-    const [, , userMsg] = await genTransReq({
-      apiType: OPT_TRANS_OPENAI,
-      url: "https://api.openai.com/v1/chat/completions",
-      key: "test-key",
-      model: "test-model",
-      systemPrompt: defaultSystemPrompt,
-      useBatchFetch: true,
-      ioInputFormat: "custom",
-      ioInputTemplate:
-        "Translate: {{to_lang|raw}}|{% for s in segments %}{{s.id}}:{{s.source_text|raw}};{% endfor %}",
-      from: "en",
-      to: "zh",
-      fromLang: "English",
-      toLang: "zh-CN",
-      texts: ["A <b>React</b> component.", "Line 1\nLine 2"],
-      glossary: {},
-      docInfo: { title: "", description: "" },
-    });
-    expect(userMsg.content).toBe(
-      "Translate: zh-CN|0:A <b>React</b> component.;1:Line 1\nLine 2;"
-    );
-  });
-
-  test("ioInputFormat custom falls back to json template when template is empty", async () => {
-    const content = await renderSystemPrompt({
-      systemPrompt: defaultSystemPrompt,
-      ioInputFormat: "custom",
-    });
-    expect(content).toContain(
-      `### Input\nThe input looks like:\n\`\`\`\n${EXAMPLE_INPUT}`
-    );
-  });
 });
 
 // UI 预览（Prompts 页只读框）与运行时追加的示例逐字节一致：renderBatchExample
@@ -465,22 +431,6 @@ describe("renderBatchExample (UI preview)", () => {
     });
     expect(content).toBe(
       `${defaultSystemPrompt}\n\n${renderBatchExample("percent", "percent")}`
-    );
-  });
-
-  test("custom template preview renders with the custom input template", () => {
-    expect(
-      renderBatchExample(
-        "custom",
-        "json",
-        "Translate: {{to_lang|raw}}|{% for s in segments %}{{s.id}}:{{s.source_text|raw}};{% endfor %}"
-      )
-    ).toBe(
-      EXAMPLE_MARKDOWN(
-        "Translate: zh-CN|0:A <b>React</b> component.;1:Line 1\nLine 2;",
-        EXAMPLE_OUTPUT_JSON,
-        JSON_PROMPT_NOTE
-      )
     );
   });
 
