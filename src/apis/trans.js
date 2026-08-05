@@ -139,9 +139,8 @@ const SAMPLE_TRANSLATIONS = [
   { id: 1, translation: ["第一行\n第二行", "en"] },
 ];
 
-// 批量用户消息的统一渲染入口：真实请求与 Output example 走同一模板与同一转义，
-// 保证 "system prompt 示例输入 == 真实输入"。source_text 先经 inputFormat.normalize
-// 保护输入结构字符，再经 outputFormat.normalize 预热输出
+// 聚合翻译输入统一渲染入口：真实请求与 Output example 走同一模板与同一转义，
+// 保证 "system prompt 示例输入 == 真实输入"。
 const buildBatchInput = (
   segments,
   vars,
@@ -155,11 +154,7 @@ const buildBatchInput = (
     ...vars,
     glossary_lines: glossaryLines,
     segments: segments.map((seg) => {
-      const encoded = inputFormat.normalize(String(seg.source_text ?? ""));
-      const source_text =
-        inputFormat.name === "percent" && outputFormat.name === "percent"
-          ? encoded
-          : outputFormat.normalize(encoded);
+      const source_text = outputFormat.normalize(String(seg.source_text ?? ""));
       return { id: seg.id, source_text };
     }),
   });
