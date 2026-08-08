@@ -42,7 +42,8 @@ export const DEFAULT_DICTIONARY_PROMPT_SLUG = PROMPT_SLUG_DICTIONARY_EN_ZH;
 // 配置数据结构的版本号（用于检测并执行数据迁移升级逻辑）
 export const SETTINGS_VERSION_V1 = 1;
 export const SETTINGS_VERSION_V2 = 2;
-export const CURRENT_SETTINGS_VERSION = SETTINGS_VERSION_V2;
+export const SETTINGS_VERSION_V3 = 3;
+export const CURRENT_SETTINGS_VERSION = SETTINGS_VERSION_V3;
 
 /**
  * 预设的提示词列表。包含了系统出厂自带的各种场景提示词模板。
@@ -119,14 +120,75 @@ const PROMPT_STORAGE_FIELDS = [
 ];
 
 /**
+ * 基于系统提示词内容识别旧版 (V1/V2) 聚合提示词的输出格式。
+ * XML/LINE/JSON 预设重构为统一的 defaultSystemPrompt 之前，各自携带独立的
+ * 系统提示词文本，用户复制出的自定义 Prompt 因此不含 inputFormat/outputFormat 字段。
+ * 运行时若缺失格式将静默按 JSON 处理，造成提示词指示 XML/LINE 却收到 JSON 协议。
+ * 这里按旧文本与解析器预设中的专属签名识别格式，避免静默漂移。
+ *
+ * @param {string} systemPrompt 聚合系统提示词文本
+ * @returns {"xml"|"textlines"|"json"|""} 识别的输出格式，无法识别返回空字符串
+ */
+export function detectLegacyBatchOutputFormat(systemPrompt = "") {
+  const text = String(systemPrompt);
+  if (
+    /Output raw XML-like format only|Output ONLY the <root> element|Maintain the exact "id" from the input in the "id" attribute/i.test(
+      text
+    )
+  ) {
+    return "xml";
+  }
+  if (
+    /Output raw text lines in.*ID \| Text|Output exactly one line per segment using the format/i.test(
+      text
+    )
+  ) {
+    return "textlines";
+  }
+  if (/Output a single raw JSON object only/i.test(text)) {
+    return "json";
+  }
+  return "";
+}
+
+/**
+ * 旧版聚合提示词格式元数据。仅对内容命中旧版 XML/LINE/JSON 签名的
+ * 批量系统提示词生效，供 UI 在“提示词管理”页标注与提醒。
+ *
+ * @param {Object} prompt 待检测的提示词对象
+ * @returns {{outputFormat: string, mismatched: boolean}|null}
+ *          内容的识别格式与是否与当前存储格式不一致；非批量或未命中返回 null
+ */
+export function getLegacyBatchPromptMetadata(prompt = {}) {
+  const normalized = normalizePrompt(prompt);
+  if (normalized.category !== PROMPT_CATEGORY_BATCH_SYSTEM) {
+    return null;
+  }
+
+  const outputFormat = detectLegacyBatchOutputFormat(normalized.systemPrompt);
+  if (!outputFormat) {
+    return null;
+  }
+
+  return {
+    outputFormat,
+    mismatched: Boolean(
+      normalized.outputFormat && normalized.outputFormat !== outputFormat
+    ),
+  };
+}
+
+/**
  * 规范化提示词对象，确保所有必填字段为字符串格式。
  * 避免因为 undefined 等值导致报错或判断异常。
+ * 对缺少格式字段的旧版批量提示词，按系统提示词内容推断输入/输出格式，
+ * 保证 UI 展示与运行时解析不再静默回退为 JSON。
  *
  * @param {Object} prompt 原始提示词对象
  * @returns {Object} 规范化后的提示词对象
  */
 export function normalizePrompt(prompt = {}) {
-  return {
+  const normalized = {
     slug: String(prompt.slug || ""),
     category: String(prompt.category || ""),
     nameKey: String(prompt.nameKey || ""),
@@ -136,6 +198,18 @@ export function normalizePrompt(prompt = {}) {
     inputFormat: String(prompt.inputFormat || ""),
     outputFormat: String(prompt.outputFormat || ""),
   };
+
+  if (normalized.category === PROMPT_CATEGORY_BATCH_SYSTEM) {
+    const outputFormat =
+      normalized.outputFormat ||
+      detectLegacyBatchOutputFormat(normalized.systemPrompt);
+    if (outputFormat) {
+      normalized.inputFormat = normalized.inputFormat || "json";
+      normalized.outputFormat = outputFormat;
+    }
+  }
+
+  return normalized;
 }
 
 /**
@@ -566,10 +640,12 @@ function migrateLegacyApiPrompt(apiSetting, migration, customPromptState) {
   );
 
   if (!customPromptState.promptBySlug.has(promptSlug)) {
-    const migratedPrompt = {
+    // 迁移出的自定义提示词经 normalizePrompt 补齐缺失的输入/输出格式，
+    // 避免旧内联 XML/LINE 提示词升级后静默按 JSON 协议处理。
+    const migratedPrompt = normalizePrompt({
       ...sourcePrompt,
       slug: promptSlug,
-    };
+    });
     customPromptState.prompts.push(migratedPrompt);
     customPromptState.promptBySlug.set(promptSlug, migratedPrompt);
     customPromptState.hasPromptChanges = true;
@@ -707,6 +783,54 @@ export function migrateSettingPromptsToV2(setting = {}) {
   }
 
   return nextSetting;
+}
+
+/**
+ * V2 → V3 迁移：为缺少格式字段的旧版自定义批量提示词补齐输入/输出格式。
+ * 旧版复制或自定义的 XML/LINE Prompt 没有 inputFormat/outputFormat 字段，
+ * 运行时解析会静默按 JSON 处理。这里按系统提示词内容识别格式并写回存储，
+ * 与 normalizePrompt 的运行时自愈保持一致，保证数据落盘后字段完整。
+ *
+ * @param {Object} setting V2 及以下版本配置对象
+ * @returns {Object} 补齐格式后的配置对象，version 统一提升为 SETTINGS_VERSION_V3
+ */
+export function migrateSettingPromptsToV3(setting = {}) {
+  if (!setting || typeof setting !== "object") {
+    return setting;
+  }
+
+  const nextSetting = { ...setting, version: SETTINGS_VERSION_V3 };
+  if (!Array.isArray(setting.prompts)) {
+    return nextSetting;
+  }
+
+  let hasPromptChanges = false;
+  const prompts = setting.prompts.map((prompt) => {
+    if (!prompt || typeof prompt !== "object") {
+      return prompt;
+    }
+
+    // 已显式携带格式字段的提示词无需处理（含现代副本与已迁移数据）。
+    if (hasOwn(prompt, "inputFormat") && hasOwn(prompt, "outputFormat")) {
+      return prompt;
+    }
+
+    const outputFormat = detectLegacyBatchOutputFormat(
+      String(prompt.systemPrompt || "")
+    );
+    if (!outputFormat) {
+      return prompt;
+    }
+
+    hasPromptChanges = true;
+    return {
+      ...prompt,
+      inputFormat: prompt.inputFormat || "json",
+      outputFormat: prompt.outputFormat || outputFormat,
+    };
+  });
+
+  return hasPromptChanges ? { ...nextSetting, prompts } : nextSetting;
 }
 
 /**

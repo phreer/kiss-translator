@@ -1589,6 +1589,22 @@ export const I18N = {
     ko: `프롬프트 추가`,
     tr: `İstem Ekle`,
   },
+  legacy_prompt_migration_notice: {
+    zh: `新版聚合提示词需要明确指定输入/输出格式，格式说明与示例会自动渲染到请求中，无需再写在系统提示词里。已检测到 {count} 个旧版自定义提示词，建议删除后重新添加，在新版本基础上自定义。`,
+    en: `In the new version, aggregation prompts require explicit input/output formats; their instructions and examples are auto-rendered into the request, so they no longer belong in the system prompt. Detected {count} legacy custom prompts — please delete them and re-add one, then customize from the new-version template.`,
+    zh_TW: `新版聚合提示詞需要明確指定輸入/輸出格式，格式說明與範例會自動渲染到請求中，無需再寫在系統提示詞裡。已偵測到 {count} 個舊版自訂提示詞，建議刪除後重新新增，基於新版本自訂。`,
+    ja: `新版の一括翻訳プロンプトでは入力/出力形式を明示する必要があります。形式の説明と例はリクエストに自動で描画されるため、システムプロンプトに書く必要はありません。{count} 個の旧版カスタムプロンプトを検出しました。削除してから再追加し、新バージョンを基にカスタマイズしてください。`,
+    ko: `새 버전의 일괄 프롬프트는 입력/출력 형식을 명시해야 하며, 형식 설명과 예시는 요청에 자동으로 렌더링되므로 시스템 프롬프트에 작성할 필요가 없습니다. {count}개의 구 버전 사용자 프롬프트가 감지되었습니다. 삭제 후 새로 추가하고 새 버전을 기반으로 사용자 지정하세요.`,
+    tr: `Yeni sürümde toplu istemler açık girdi/çıktı biçimi gerektirir; biçim açıklamaları ve örnekler isteğe otomatik eklenir, sistem istemine yazılması gerekmez. {count} eski özel istem algılandı. Lütfen bunları silip yeniden ekleyin ve yeni sürüm şablonundan özelleştirin.`,
+  },
+  legacy_prompt_format_tip: {
+    zh: `旧版提示词，按内容识别出的输出格式`,
+    en: `Legacy prompt; output format inferred from content`,
+    zh_TW: `舊版提示詞，依內容識別出的輸出格式`,
+    ja: `旧版プロンプト。内容から識別した出力形式`,
+    ko: `구 버전 프롬프트로, 콘텐츠에서 식별된 출력 형식`,
+    tr: `Eski istem; içerikten çıkarılan çıktı biçimi`,
+  },
   prompt_category_batch_system: {
     zh: `聚合系统提示词`,
     en: `Batch System Prompt`,

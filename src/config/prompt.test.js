@@ -11,10 +11,14 @@ import {
   PROMPT_MODE_GLOBAL,
   PROMPT_TEMPLATE_CATEGORIES,
   SETTINGS_VERSION_V2,
+  SETTINGS_VERSION_V3,
   applyPromptTestOverrides,
+  detectLegacyBatchOutputFormat,
   getDictionaryPromptOptions,
+  getLegacyBatchPromptMetadata,
   getPromptDisplayName,
   migrateSettingPromptsToV2,
+  migrateSettingPromptsToV3,
   normalizeCustomPrompts,
   normalizePrompt,
   removeLegacyApiPromptIds,
@@ -358,6 +362,184 @@ describe("prompt settings", () => {
     expect(normalizePrompt({}).inputFormat).toBe("");
   });
 
+  test("detectLegacyBatchOutputFormat identifies legacy xml/textlines/json prompts", () => {
+    expect(detectLegacyBatchOutputFormat(defaultSystemPrompt)).toBe("");
+    expect(
+      detectLegacyBatchOutputFormat(
+        "Act as a translation API. Output raw XML-like format only. No Markdown fences (xml)."
+      )
+    ).toBe("xml");
+    expect(
+      detectLegacyBatchOutputFormat(
+        'Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown.'
+      )
+    ).toBe("textlines");
+    expect(
+      detectLegacyBatchOutputFormat(
+        "Act as a translation API. Output a single raw JSON object only."
+      )
+    ).toBe("json");
+  });
+
+  test("normalizePrompt infers formats for legacy batch prompts without format fields", () => {
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt:
+          "Act as a translation API. Output raw XML-like format only. No Markdown.",
+      })
+    ).toMatchObject({
+      inputFormat: "json",
+      outputFormat: "xml",
+    });
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt:
+          'Act as a translation API. Output raw text lines in "ID | Text" format.',
+      })
+    ).toMatchObject({
+      inputFormat: "json",
+      outputFormat: "textlines",
+    });
+    // 保留用户显式设置的格式，不因内容探测覆盖。
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt: "Output raw XML-like format only",
+        inputFormat: "percent",
+        outputFormat: "json",
+      })
+    ).toMatchObject({
+      inputFormat: "percent",
+      outputFormat: "json",
+    });
+    // 非批量分类不参与格式推断。
+    expect(
+      normalizePrompt({
+        slug: "prompt_custom",
+        category: PROMPT_CATEGORY_USER,
+        systemPrompt: "Output raw XML-like format only",
+      })
+    ).toMatchObject({ inputFormat: "", outputFormat: "" });
+  });
+
+  test("getLegacyBatchPromptMetadata reports detected format and mismatch", () => {
+    expect(
+      getLegacyBatchPromptMetadata({
+        slug: "legacy_xml",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt:
+          "Act as a translation API. Output raw XML-like format only.",
+      })
+    ).toEqual({ outputFormat: "xml", mismatched: false });
+    expect(
+      getLegacyBatchPromptMetadata({
+        slug: "legacy_line",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt:
+          'Act as a translation API. Output raw text lines in "ID | Text" format.',
+        outputFormat: "textlines",
+      })
+    ).toEqual({ outputFormat: "textlines", mismatched: false });
+    // 内容识别为 XML，但存储格式为 JSON：标记不一致。
+    expect(
+      getLegacyBatchPromptMetadata({
+        slug: "conflicted",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt:
+          "Act as a translation API. Output raw XML-like format only.",
+        outputFormat: "json",
+      })
+    ).toEqual({ outputFormat: "xml", mismatched: true });
+    // 非批量或无签名的提示词不标记。
+    expect(
+      getLegacyBatchPromptMetadata({
+        slug: "nobatch",
+        category: PROMPT_CATEGORY_USER,
+        systemPrompt: "Output raw XML-like format only.",
+      })
+    ).toBeNull();
+    expect(
+      getLegacyBatchPromptMetadata({
+        slug: "modern",
+        category: PROMPT_CATEGORY_BATCH_SYSTEM,
+        systemPrompt: defaultSystemPrompt,
+      })
+    ).toBeNull();
+  });
+
+  test("migrates legacy inline xml/line batch prompts with detected formats", () => {
+    const migrated = migrateSettingPromptsToV2({
+      prompts: [],
+      transApis: [
+        {
+          apiSlug: "openai",
+          systemPrompt:
+            'Act as a translation API. Output raw text lines in "ID | Text" format. No Markdown.',
+        },
+      ],
+    });
+
+    const api = migrated.transApis[0];
+    expect(api.batchPromptSlug).toMatch(/^prompt_migrated_batch_/);
+    expect(
+      migrated.prompts.find((prompt) => prompt.slug === api.batchPromptSlug)
+    ).toMatchObject({
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      inputFormat: "json",
+      outputFormat: "textlines",
+    });
+  });
+
+  test("migrateSettingPromptsToV3 fills formats for legacy prompts and is idempotent", () => {
+    const legacyPrompt = {
+      slug: "legacy_xml",
+      category: PROMPT_CATEGORY_BATCH_SYSTEM,
+      name: "Legacy XML",
+      systemPrompt:
+        "Act as a translation API. Output raw XML-like format only. No nested.",
+    };
+    const migrated = migrateSettingPromptsToV3({
+      version: SETTINGS_VERSION_V2,
+      prompts: [legacyPrompt],
+    });
+
+    expect(migrated.version).toBe(SETTINGS_VERSION_V3);
+    expect(migrated.prompts[0]).toMatchObject({
+      slug: "legacy_xml",
+      inputFormat: "json",
+      outputFormat: "xml",
+    });
+
+    // 幂等：再次迁移不改变已补全的数据。
+    const migratedAgain = migrateSettingPromptsToV3(migrated);
+    expect(migratedAgain.prompts[0]).toEqual(migrated.prompts[0]);
+  });
+
+  test("migrateSettingPromptsToV3 keeps explicitly set formats untouched", () => {
+    const migrated = migrateSettingPromptsToV3({
+      version: SETTINGS_VERSION_V2,
+      prompts: [
+        {
+          slug: "modern",
+          category: PROMPT_CATEGORY_BATCH_SYSTEM,
+          systemPrompt:
+            "Act as a translation API. Output raw XML-like format only.",
+          inputFormat: "percent",
+          outputFormat: "xml",
+        },
+      ],
+    });
+    expect(migrated.prompts[0]).toMatchObject({
+      inputFormat: "percent",
+      outputFormat: "xml",
+    });
+  });
+
   test("resolveApiPromptSettings inlines the batch prompt format into the api setting", () => {
     const api = {
       apiSlug: "openai",
@@ -417,9 +599,7 @@ describe("applyPromptTestOverrides", () => {
       inputFormat: "percent",
       outputFormat: "xml",
     };
-    expect(
-      applyPromptTestOverrides({ useBatchFetch: false }, prompt)
-    ).toEqual({
+    expect(applyPromptTestOverrides({ useBatchFetch: false }, prompt)).toEqual({
       useBatchFetch: true,
       systemPrompt: "Custom batch rules.",
       ioInputFormat: "percent",
@@ -448,9 +628,7 @@ describe("applyPromptTestOverrides", () => {
       systemPrompt: "Custom nobatch.",
       userPrompt: "Custom user.",
     };
-    expect(
-      applyPromptTestOverrides({ useBatchFetch: true }, prompt)
-    ).toEqual({
+    expect(applyPromptTestOverrides({ useBatchFetch: true }, prompt)).toEqual({
       useBatchFetch: false,
       nobatchPrompt: "Custom nobatch.",
       nobatchUserPrompt: "Custom user.",

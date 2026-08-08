@@ -18,7 +18,9 @@ import {
   BUILTIN_RULES,
   getSettingVersion,
   migrateSettingPromptsToV2,
+  migrateSettingPromptsToV3,
   SETTINGS_VERSION_V2,
+  SETTINGS_VERSION_V3,
 } from "../config";
 import { isExt, isGm } from "./client";
 import { browser } from "./browser";
@@ -173,18 +175,43 @@ export const migrateStoredSettingToV2 = async (
   return migrateSettingPromptsToV2(setting);
 };
 
+/**
+ * 将存储配置升级到 V3。V1/V2 数据分别执行对应的提示词迁移，
+ * 保证旧版内联 XML/LINE 提示词与自定义副本补齐输入/输出格式后持久化。
+ *
+ * @param {Object} setting 当前存储的配置对象
+ * @param {Object} backupSetting 用于备份的原始 V1 配置
+ * @returns {Promise<Object>} 升级后的配置对象
+ */
+export const migrateStoredSettingToV3 = async (
+  setting,
+  backupSetting = setting
+) => {
+  if (getSettingVersion(setting) >= SETTINGS_VERSION_V3) {
+    return setting;
+  }
+
+  let nextSetting = setting;
+  if (getSettingVersion(setting) < SETTINGS_VERSION_V2) {
+    await writeSettingBackupBeforeV2(backupSetting);
+    nextSetting = migrateSettingPromptsToV2(setting);
+  }
+
+  return migrateSettingPromptsToV3(nextSetting);
+};
+
 export const runDataMigration = async () => {
   const rawSetting = await getSetting();
-  if (rawSetting && getSettingVersion(rawSetting) < SETTINGS_VERSION_V2) {
+  if (rawSetting && getSettingVersion(rawSetting) < SETTINGS_VERSION_V3) {
     try {
-      const nextSetting = await migrateStoredSettingToV2(
+      const nextSetting = await migrateStoredSettingToV3(
         rawSetting,
         rawSetting
       );
       await setObj(STOKEY_SETTING, nextSetting);
-      kissLog("Migration to V2 completed.");
+      kissLog("Migration to V3 completed.");
     } catch (err) {
-      kissLog("Data migration to V2 failed:", err);
+      kissLog("Data migration to V3 failed:", err);
     }
   }
 };
@@ -195,10 +222,13 @@ export const getSettingWithDefault = async () => {
     return DEFAULT_SETTING;
   }
 
-  const setting =
-    getSettingVersion(rawSetting) < SETTINGS_VERSION_V2
-      ? migrateSettingPromptsToV2(rawSetting)
-      : rawSetting;
+  let setting = rawSetting;
+  if (getSettingVersion(rawSetting) < SETTINGS_VERSION_V2) {
+    setting = migrateSettingPromptsToV2(rawSetting);
+  }
+  if (getSettingVersion(setting) < SETTINGS_VERSION_V3) {
+    setting = migrateSettingPromptsToV3(setting);
+  }
 
   return mergeSettingWithDefault(setting);
 };

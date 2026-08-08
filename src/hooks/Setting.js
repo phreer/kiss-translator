@@ -12,8 +12,10 @@ import {
   KV_SETTING_KEY,
   MSG_SET_LOGLEVEL,
   SETTINGS_VERSION_V2,
+  SETTINGS_VERSION_V3,
   getSettingVersion,
   migrateSettingPromptsToV2,
+  migrateSettingPromptsToV3,
 } from "../config";
 import { useStorage } from "./Storage";
 import { debounceSyncMeta } from "../libs/storage";
@@ -47,21 +49,26 @@ export function SettingProvider({ children, context }) {
   const settingVersion = getSettingVersion(setting);
   const logLevel = setting?.logLevel;
 
-  // 兼容直接从 Storage 或云同步回填进来的旧版设置，确保进入界面的配置已经升级到 V2。
+  // 兼容直接从 Storage 或云同步回填进来的旧版设置，确保进入界面的配置已升级到最新版本。
+  // V2→V3 迁移为旧版自定义 XML/LINE 提示词补齐格式，避免静默按 JSON 处理。
   useEffect(() => {
-    if (!hasSetting || settingVersion >= SETTINGS_VERSION_V2) {
+    if (!hasSetting || settingVersion >= SETTINGS_VERSION_V3) {
       return;
     }
 
     update((currentSetting) => {
       if (
         !currentSetting ||
-        getSettingVersion(currentSetting) >= SETTINGS_VERSION_V2
+        getSettingVersion(currentSetting) >= SETTINGS_VERSION_V3
       ) {
         return currentSetting;
       }
 
-      return migrateSettingPromptsToV2(currentSetting);
+      let nextSetting = currentSetting;
+      if (getSettingVersion(currentSetting) < SETTINGS_VERSION_V2) {
+        nextSetting = migrateSettingPromptsToV2(currentSetting);
+      }
+      return migrateSettingPromptsToV3(nextSetting);
     });
   }, [hasSetting, settingVersion, update]);
 

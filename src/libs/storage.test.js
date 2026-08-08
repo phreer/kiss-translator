@@ -2,6 +2,7 @@ import {
   STOKEY_SETTING,
   STOKEY_SETTING_BACKUP_V1_BEFORE_V2,
   SETTINGS_VERSION_V2,
+  SETTINGS_VERSION_V3,
   DEFAULT_SUBTITLE_SETTING,
 } from "../config";
 import { getSettingWithDefault, runDataMigration } from "./storage";
@@ -62,11 +63,37 @@ describe("settings storage migration", () => {
     const stored = readStoredJson(STOKEY_SETTING);
 
     expect(backup).toEqual(oldSetting);
-    expect(stored.version).toBe(SETTINGS_VERSION_V2);
+    expect(stored.version).toBe(SETTINGS_VERSION_V3);
     expect(stored.transApis[0].batchPromptSlug).toMatch(
       /^prompt_migrated_batch_/
     );
     expect(stored.transApis[0]).not.toHaveProperty("systemPrompt");
+  });
+
+  test("runDataMigration persists detected formats for v2 legacy prompts", async () => {
+    const legacySetting = {
+      version: SETTINGS_VERSION_V2,
+      prompts: [
+        {
+          slug: "legacy_xml",
+          category: "batch system prompt",
+          name: "Legacy XML",
+          systemPrompt:
+            "Act as a translation API. Output raw XML-like format only. No Markdown.",
+        },
+      ],
+    };
+    window.localStorage.setItem(STOKEY_SETTING, JSON.stringify(legacySetting));
+
+    await runDataMigration();
+
+    const stored = readStoredJson(STOKEY_SETTING);
+    expect(stored.version).toBe(SETTINGS_VERSION_V3);
+    expect(stored.prompts[0]).toMatchObject({
+      slug: "legacy_xml",
+      inputFormat: "json",
+      outputFormat: "xml",
+    });
   });
 
   test("getSettingWithDefault returns migrated v2 settings for stored v1 data", async () => {
@@ -84,7 +111,7 @@ describe("settings storage migration", () => {
 
     const setting = await getSettingWithDefault();
 
-    expect(setting.version).toBe(SETTINGS_VERSION_V2);
+    expect(setting.version).toBe(SETTINGS_VERSION_V3);
     expect(setting.transApis[0].batchPromptSlug).toMatch(
       /^prompt_migrated_batch_/
     );

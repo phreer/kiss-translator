@@ -16,6 +16,7 @@ import SaveIcon from "@mui/icons-material/Save";
 import TextSnippetIcon from "@mui/icons-material/TextSnippet";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
 import Grid from "@mui/material/Grid";
 import List from "@mui/material/List";
 import ListItem from "@mui/material/ListItem";
@@ -26,6 +27,7 @@ import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import Alert from "@mui/material/Alert";
 import { useConfirm } from "../../hooks/Confirm";
 import { useI18n } from "../../hooks/I18n";
 import {
@@ -46,6 +48,7 @@ import {
   PROMPT_CATEGORY_USER,
   PROMPT_TEMPLATE_CATEGORIES,
   DEFAULT_BATCH_PROMPT_SLUG,
+  getLegacyBatchPromptMetadata,
   getPromptCategoryDisplayName,
   getPromptDisplayName,
   normalizePrompt,
@@ -139,7 +142,14 @@ function PromptPlaceholderButtons({ category, disabled, onInsert }) {
   );
 }
 
-function PromptListItem({ prompt, selected, isPreset, onSelect }) {
+function PromptListItem({
+  prompt,
+  selected,
+  isPreset,
+  onSelect,
+  legacyFormat = "",
+  legacyMismatch = false,
+}) {
   const i18n = useI18n();
 
   return (
@@ -176,6 +186,24 @@ function PromptListItem({ prompt, selected, isPreset, onSelect }) {
         >
           {getPromptDisplayName(prompt, i18n)}
         </Typography>
+        {legacyFormat && (
+          <Chip
+            size="small"
+            variant="outlined"
+            label={legacyFormat.toUpperCase()}
+            title={i18n(
+              "legacy_prompt_format_tip",
+              "旧版提示词，按内容识别出的输出格式"
+            )}
+            color={legacyMismatch ? "warning" : "default"}
+            sx={{
+              flex: "0 0 auto",
+              height: 20,
+              fontSize: "0.65rem",
+              borderRadius: 0.75,
+            }}
+          />
+        )}
       </ListItemButton>
     </ListItem>
   );
@@ -226,11 +254,7 @@ function PromptFields({
             formData.outputFormat || "json"
           )
         : "",
-    [
-      formData.category,
-      formData.inputFormat,
-      formData.outputFormat,
-    ]
+    [formData.category, formData.inputFormat, formData.outputFormat]
   );
 
   const handleChange = (event) => {
@@ -516,6 +540,30 @@ export default function Prompts() {
     [prompts, selectedPromptSlug]
   );
 
+  // 旧版批量提示词格式元数据：按内容识别 XML/LINE/JSON 并标记格式不一致项，
+  // 用于列表角标与顶部迁移引导横幅。
+  const legacyPromptNotes = useMemo(
+    () =>
+      prompts
+        .map((prompt) => {
+          const normalized = normalizePrompt(prompt);
+          if (isPresetPromptSlug(normalized.slug)) {
+            return null;
+          }
+          const metadata = getLegacyBatchPromptMetadata(normalized);
+          if (!metadata) {
+            return null;
+          }
+          return {
+            slug: normalized.slug,
+            outputFormat: metadata.outputFormat,
+            mismatched: metadata.mismatched,
+          };
+        })
+        .filter(Boolean),
+    [isPresetPromptSlug, prompts]
+  );
+
   const promptTemplateGroups = useMemo(
     () =>
       PROMPT_TEMPLATE_CATEGORIES.map((category) => ({
@@ -571,6 +619,14 @@ export default function Prompts() {
   return (
     <Box>
       <Stack spacing={3}>
+        {legacyPromptNotes.length > 0 && (
+          <Alert severity="info" sx={{ mb: 0 }}>
+            {i18n(
+              "legacy_prompt_migration_notice",
+              "新版聚合提示词需要明确指定输入/输出格式，格式说明与示例会自动渲染到请求中，无需再写在系统提示词里。已检测到 {count} 个旧版自定义提示词，建议删除后重新添加，在新版本基础上自定义。"
+            ).replace("{count}", String(legacyPromptNotes.length))}
+          </Alert>
+        )}
         <Box>
           <Stack
             direction="row"
@@ -662,17 +718,26 @@ export default function Prompts() {
             })}
           >
             <List disablePadding>
-              {prompts.map((prompt) => (
-                <PromptListItem
-                  key={normalizePrompt(prompt).slug}
-                  prompt={prompt}
-                  selected={normalizePrompt(prompt).slug === selectedPromptSlug}
-                  isPreset={isPresetPromptSlug(normalizePrompt(prompt).slug)}
-                  onSelect={() =>
-                    setSelectedPromptSlug(normalizePrompt(prompt).slug)
-                  }
-                />
-              ))}
+              {prompts.map((prompt) => {
+                const note = legacyPromptNotes.find(
+                  (item) => item.slug === normalizePrompt(prompt).slug
+                );
+                return (
+                  <PromptListItem
+                    key={normalizePrompt(prompt).slug}
+                    prompt={prompt}
+                    selected={
+                      normalizePrompt(prompt).slug === selectedPromptSlug
+                    }
+                    isPreset={isPresetPromptSlug(normalizePrompt(prompt).slug)}
+                    onSelect={() =>
+                      setSelectedPromptSlug(normalizePrompt(prompt).slug)
+                    }
+                    legacyFormat={note?.outputFormat || ""}
+                    legacyMismatch={note?.mismatched || false}
+                  />
+                );
+              })}
             </List>
           </Box>
 
